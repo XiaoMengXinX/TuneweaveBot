@@ -1,0 +1,17 @@
+#GitHub Staff
+.github
+
+#Git
+.gitignore
+LICENSE
+README.md
+
+#Other
+config_example.ini
+plugins/*.wasm
+/dist
+cache
+*.db
+
+#Docker
+docker-compose.yml

@@ -1,0 +1,42 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.bak
+*.db
+
+# Test binary, built with `go test -c`
+*.test
+test
+music
+pic
+log
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+/.idea/
+config.ini
+config.toml
+/TuneweaveBot
+/TuneweaveBot.exe
+/src
+/ext
+/cache
+/data/
+/test
+*.mp3
+*.flac
+cache.db*
+
+# 个人维护文档
+/docs
+
+# 插件构建产物与运行时密钥
+/dist/
+plugins/*.wasm
+plugins/.secret.key

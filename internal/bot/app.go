@@ -1,0 +1,344 @@
+// Package bot 处理 Telegram 更新
+package bot
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	tgb "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/semaphore"
+
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/auth"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/config"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/fetch"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/logging"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/plugin"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/provider"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
+)
+
+// ErrReload /reload 触发的取消原因
+var ErrReload = errors.New("reload requested")
+
+var errLoginStopped = errors.New("startup login not completed")
+
+// LoginState 启动时的 Cookie 状态
+type LoginState int
+
+const (
+	LoginNone    LoginState = iota // 正常
+	LoginEmpty                     // 未配置
+	LoginInvalid                   // 已失效
+)
+
+// BuildInfo 编译信息，由 ldflags 注入
+type BuildInfo struct {
+	RuntimeVer  string
+	VersionName string
+	CommitSHA   string
+	BuildTime   string
+	BuildArch   string
+}
+
+type App struct {
+	cfg           *config.Config
+	cfgPath       string
+	tg            *tgb.Bot
+	me            *models.User
+	store         *store.Store
+	plugins       *plugin.Manager
+	providers     *provider.Registry
+	auth          *auth.Manager
+	recognizers   []provider.Recognizer
+	dl            *fetch.Downloader
+	log           *logrus.Logger
+	build         BuildInfo
+	cacheDir      string
+	http          *http.Client
+	musicSem      *semaphore.Weighted
+	statusSem     *semaphore.Weighted
+	loginMu       sync.Mutex // 同时只允许一个扫码登录会话
+	loginCancelMu sync.Mutex // 保护 loginCancel 与 loginSurfaces
+	loginCancel   context.CancelCauseFunc
+	// loginSurfaces 记录当前会话的登录按钮消息，避免旧消息误取消新会话
+	loginSurfaces map[surfaceKey]bool
+	startupMu     sync.Mutex      // 保护 startupQR
+	startupQR     *startupSession // 非 nil 表示启动登录进行中
+	cacheChat     atomic.Int64    // 0 表示未设置缓存群
+	warnMu        sync.Mutex      // 保护 warnCancel
+	warnCancel    context.CancelFunc
+	reload        context.CancelCauseFunc
+	cooldownMu    sync.Mutex                // 保护 cooldowns
+	cooldowns     map[cooldownKey]time.Time // 冷却截止时间
+	inflight      sync.WaitGroup            // 在途 handler，优雅退出时等待
+}
+
+// Run 阻塞运行 bot，返回 true 表示需重载配置
+// Cookie 缺失或失效时引导扫码登录，超时则停止
+func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Logger, build BuildInfo, client *http.Client) (reloadRequested bool, err error) {
+	cacheDir := "./cache"
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return false, err
+	}
+
+	st, err := store.Open(cfg.Database.Path, logging.GormLogger(log, cfg.Log.Level))
+	if err != nil {
+		return false, err
+	}
+	defer st.Close()
+
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
+	log.AddHook(expectedErrorHook{})
+
+	plugins, err := plugin.Load(runCtx, pluginConfig(cfg), st, log, client)
+	if err != nil {
+		return false, err
+	}
+	defer plugins.Close(context.Background())
+
+	a := &App{
+		cfg:         cfg,
+		cfgPath:     cfgPath,
+		store:       st,
+		plugins:     plugins,
+		providers:   plugins.Providers(),
+		auth:        plugins.Auths(),
+		recognizers: plugins.Recognizers(),
+		dl:          fetch.New(cacheDir, cfg.Download.Timeout.D(), cfg.Download.Retries, cfg.Download.ReverseProxy, cfg.Download.AutoRetry),
+		log:         log,
+		build:       build,
+		cacheDir:    cacheDir,
+		http:        &http.Client{Timeout: 60 * time.Second},
+		musicSem:    semaphore.NewWeighted(int64(cfg.Download.Concurrency)),
+		statusSem:   semaphore.NewWeighted(1),
+		reload:      cancel,
+	}
+
+	opts := []tgb.Option{
+		tgb.WithServerURL(cfg.Bot.APIURL),
+		tgb.WithHTTPClient(min(time.Minute, cfg.Bot.UploadTimeout.D()), &http.Client{Timeout: cfg.Bot.UploadTimeout.D()}),
+		tgb.WithSkipGetMe(), // 统一在下方 GetMe 校验
+		tgb.WithAllowedUpdates(tgb.AllowedUpdates{"message", "callback_query", "inline_query", "guest_message"}), // 避免沿用服务端设置而漏收回调
+
+		tgb.WithMiddlewares(a.recoverMiddleware),
+		tgb.WithDefaultHandler(a.handleDefault),
+		tgb.WithErrorsHandler(func(err error) {
+			// 停止或重载时中断的轮询请求不是错误
+			if runCtx.Err() == nil {
+				log.Errorf("telegram: %v", err)
+			}
+		}),
+	}
+	if cfg.Bot.Debug {
+		opts = append(opts, tgb.WithDebug())
+		// 日志级别为 debug 时才写入日志文件，否则 SDK 默认只输出到终端
+		if log.IsLevelEnabled(logrus.DebugLevel) {
+			opts = append(opts, tgb.WithDebugHandler(func(format string, args ...any) {
+				log.Debugf("tgbot: "+format, args...)
+			}))
+		}
+	}
+	tg, err := tgb.New(cfg.Bot.Token, opts...)
+	if err != nil {
+		return false, err
+	}
+	a.tg = tg
+	a.cacheChat.Store(cfg.Bot.CacheChat)
+
+	me, err := tg.GetMe(runCtx)
+	if err != nil {
+		return false, err
+	}
+	a.me = me
+	log.Printf("%s 验证成功", me.Username)
+
+	a.registerHandlers(tg)
+	a.setupCommands(runCtx, tg)
+	loginState := checkLogin(runCtx, cfg, plugins, log)
+	if loginState != LoginNone {
+		a.auth.SetAvailable(plugins.DefaultName(), false)
+		go a.startupLogin(runCtx, cancel, loginState == LoginInvalid)
+	} else {
+		a.auth.SetAvailable(plugins.DefaultName(), true)
+		go a.watchCookie(runCtx)
+	}
+	tg.Start(runCtx)
+
+	// 等在途 handler 结束再由 defer 关闭 store 与插件，避免用到已关闭的资源
+	a.waitInflight(30 * time.Second)
+
+	cause := context.Cause(runCtx)
+	if errors.Is(cause, ErrReload) {
+		return true, nil
+	}
+	if errors.Is(cause, errLoginStopped) {
+		log.Println("启动登录未完成，bot 已停止")
+		return false, nil
+	}
+	return false, nil
+}
+
+// waitInflight 最多等待 timeout 让在途 handler 结束。
+func (a *App) waitInflight(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		a.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		a.log.Warnln("等待在途请求超时，强制关闭")
+	}
+}
+
+func (a *App) registerHandlers(tg *tgb.Bot) {
+	registered := make(map[string]bool)
+	register := func(name string, h tgb.HandlerFunc, m ...tgb.Middleware) {
+		if registered[name] {
+			return
+		}
+		registered[name] = true
+		a.command(tg, name, h, m...)
+	}
+	register("start", a.handleStart)
+	register("music", a.handleMusic)
+	register("lyric", a.handleLyric)
+	register("search", a.handleSearch)
+	register("recognize", a.handleRecognize)
+	register("about", a.handleAbout)
+	register("status", a.handleStatus)
+	register("rmcache", a.handleRmCache, a.adminOnly)
+	register("reload", a.handleReload, a.adminOnly)
+	register("login", a.handleLogin, a.adminOnly)
+	register("setcachechat", a.handleSetCacheChat, a.adminOnly)
+
+	// 插件声明的命令（/netease、/program 等）由 manifest 决定，不写死在宿主
+	if a.plugins != nil {
+		for _, pc := range a.plugins.Commands() {
+			cmd := pc.Command
+			switch cmd.CommandType() {
+			case "provider":
+				register(cmd.Name, a.handleProviderMusic(pc.Plugin))
+			case "template":
+				register(cmd.Name, a.handleTemplateMusic(pc.Plugin, cmd.Template))
+			}
+		}
+	}
+
+	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "music ", tgb.MatchTypePrefix, a.handleCallbackMusic)
+	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "search ", tgb.MatchTypePrefix, a.handleCallbackSearch)
+	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "cancellogin", tgb.MatchTypeExact, a.handleCallbackCancelLogin, a.adminOnly)
+	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "startlogin", tgb.MatchTypeExact, a.handleCallbackStartLogin, a.adminOnly)
+	tg.RegisterHandlerMatchFunc(func(u *models.Update) bool { return u.InlineQuery != nil }, a.handleInline)
+	tg.RegisterHandlerMatchFunc(func(u *models.Update) bool { return u.GuestMessage != nil }, a.handleGuest)
+}
+
+func (a *App) command(tg *tgb.Bot, name string, h tgb.HandlerFunc, m ...tgb.Middleware) {
+	tg.RegisterHandlerMatchFunc(matchCommand(name, a.me.Username), h, m...)
+}
+
+func matchCommand(name, botUsername string) tgb.MatchFunc {
+	return func(update *models.Update) bool {
+		msg := update.Message
+		if msg == nil || len(msg.Entities) == 0 {
+			return false
+		}
+		e := msg.Entities[0]
+		if e.Offset != 0 || e.Type != models.MessageEntityTypeBotCommand {
+			return false
+		}
+		cmd := msg.Text[1:e.Length]
+		if i := strings.IndexByte(cmd, '@'); i >= 0 {
+			return cmd[:i] == name && cmd[i+1:] == botUsername
+		}
+		return cmd == name
+	}
+}
+
+// commandArguments 沿用旧版语义，只跳过命令后的一个字符
+func commandArguments(m *models.Message) string {
+	e := m.Entities[0]
+	if len(m.Text) == e.Length {
+		return ""
+	}
+	return m.Text[e.Length+1:]
+}
+
+// pluginConfig 把 [plugins] 与旧 [netease] 段转换为插件加载配置。
+func pluginConfig(cfg *config.Config) plugin.Config {
+	configs := make(map[string]json.RawMessage, len(cfg.Plugins.Config)+1)
+	for name, values := range cfg.Plugins.Config {
+		raw, err := json.Marshal(values)
+		if err == nil {
+			configs[name] = raw
+		}
+	}
+	// 旧 [netease] 段作为默认值，[plugins.config.netease] 优先
+	legacy := map[string]any{"level": cfg.Netease.Level}
+	if cfg.Netease.Proxy != "" {
+		legacy["proxy"] = cfg.Netease.Proxy
+	}
+	for key, value := range cfg.Plugins.Config["netease"] {
+		legacy[key] = value
+	}
+	if raw, err := json.Marshal(legacy); err == nil {
+		configs["netease"] = raw
+	}
+
+	credentials := make(map[string]string)
+	if cfg.Netease.MUSICU != "" {
+		credentials["netease"] = cfg.Netease.MUSICU
+	}
+	return plugin.Config{
+		Dir:     cfg.Plugins.Dir,
+		Enabled: cfg.Plugins.Enabled,
+		Default: cfg.Plugins.Default,
+		Runtime: plugin.RuntimeConfig{
+			CallTimeout:          cfg.Plugins.CallTimeout.D(),
+			MemoryMB:             cfg.Plugins.MemoryMB,
+			HTTPMaxBytes:         cfg.Plugins.HTTPMaxBytes,
+			AllowPrivateNetworks: cfg.Plugins.AllowPrivateNetworks,
+			Instances:            cfg.Plugins.Instances,
+		},
+		Configs:     configs,
+		Credentials: credentials,
+	}
+}
+
+// checkLogin 用默认 provider 的 Authenticator 校验启动凭据；网络错误不视为失效。
+func checkLogin(ctx context.Context, cfg *config.Config, plugins *plugin.Manager, log *logrus.Logger) LoginState {
+	name := plugins.DefaultName()
+	authenticator, ok := plugins.Auths().Get(name)
+	if !ok {
+		return LoginNone
+	}
+	status, err := authenticator.Status(ctx)
+	if err != nil {
+		log.Warnf("无法验证 %s 登录状态: %v", name, err)
+		return LoginNone
+	}
+	if status.Authenticated {
+		return LoginNone
+	}
+	// 没有旧配置凭据时引导扫码；插件也可能把凭据存在自己的 secret KV 中
+	credential := ""
+	if name == "netease" {
+		credential = cfg.Netease.MUSICU
+	}
+	if credential == "" {
+		return LoginEmpty
+	}
+	return LoginInvalid
+}

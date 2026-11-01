@@ -1,0 +1,317 @@
+package bot
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	tgb "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
+	"gorm.io/gorm/logger"
+
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/provider"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/render"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
+)
+
+func TestSearchEscapesResults(t *testing.T) {
+	var result string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/editMessageText") {
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Error(err)
+			}
+			result = r.FormValue("text")
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":10,"chat":{"id":42,"type":"private"}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	tg, err := tgb.New("1:test", tgb.WithServerURL(srv.URL), tgb.WithSkipGetMe())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(tg)
+	p := newFakeProvider()
+	p.searchFn = func(context.Context, string, int, int) ([]provider.TrackSummary, int, error) {
+		return []provider.TrackSummary{{
+			Ref:     provider.Ref{Provider: fakeProviderName, ID: "1"},
+			Title:   "<album> & 预",
+			Artists: []string{"<gv>", "A&B"},
+		}}, 1, nil
+	}
+	setTestProvider(t, a, p)
+	a.handleSearch(t.Context(), tg, &models.Update{Message: &models.Message{
+		ID:       1,
+		Text:     "/search album",
+		Chat:     models.Chat{ID: 42, Type: models.ChatTypePrivate},
+		Entities: []models.MessageEntity{{Type: models.MessageEntityTypeBotCommand, Length: len("/search")}},
+	}})
+	if want := "<code>第[1/1]页</code>\n<code>1. </code> <code>&lt;album&gt; &amp; 预 - &lt;gv&gt;/A&amp;B</code>\n"; result != want {
+		t.Errorf("search result = %q, want %q", result, want)
+	}
+}
+
+type searchTelegram struct {
+	edits   []string
+	answers []string
+	markups []models.InlineKeyboardMarkup
+	offsets []int
+	audios  []string
+}
+
+func newSearchTest(t *testing.T, total int) (*App, *tgb.Bot, *searchTelegram) {
+	t.Helper()
+	fake := &searchTelegram{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Error(err)
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/editMessageText"):
+			fake.edits = append(fake.edits, r.FormValue("text"))
+			var markup models.InlineKeyboardMarkup
+			if err := json.Unmarshal([]byte(r.FormValue("reply_markup")), &markup); err != nil {
+				t.Error(err)
+			}
+			fake.markups = append(fake.markups, markup)
+		case strings.HasSuffix(r.URL.Path, "/answerCallbackQuery"):
+			fake.answers = append(fake.answers, r.FormValue("text")+r.FormValue("url"))
+			_, _ = io.WriteString(w, `{"ok":true,"result":true}`)
+			return
+		case strings.HasSuffix(r.URL.Path, "/sendAudio"):
+			fake.audios = append(fake.audios, r.FormValue("chat_id")+" "+r.FormValue("audio")+" "+r.FormValue("reply_parameters"))
+		case strings.HasSuffix(r.URL.Path, "/deleteMessage"):
+			_, _ = io.WriteString(w, `{"ok":true,"result":true}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":10,"chat":{"id":42,"type":"private"}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	tg, err := tgb.New("1:test", tgb.WithServerURL(srv.URL), tgb.WithSkipGetMe())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(tg)
+	st, err := store.Open(filepath.Join(t.TempDir(), "cache.db"), logger.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	a.store = st
+	if err := st.Save(&store.SongInfo{MusicID: 1, SongName: "Song 1", FileID: "cached-audio"}); err != nil {
+		t.Fatal(err)
+	}
+	p := newFakeProvider()
+	p.searchFn = func(_ context.Context, _ string, _ int, offset int) ([]provider.TrackSummary, int, error) {
+		fake.offsets = append(fake.offsets, offset)
+		var items []provider.TrackSummary
+		for id := offset + 1; id <= min(offset+searchPageSize, total); id++ {
+			items = append(items, provider.TrackSummary{
+				Ref:     provider.Ref{Provider: fakeProviderName, ID: strconv.Itoa(id)},
+				Title:   fmt.Sprintf("Song %d", id),
+				Artists: []string{"Artist"},
+			})
+		}
+		return items, total, nil
+	}
+	setTestProvider(t, a, p)
+	return a, tg, fake
+}
+
+func searchCommand(chat models.Chat) *models.Message {
+	return &models.Message{
+		ID:       1,
+		Text:     "/search 晴天",
+		Chat:     chat,
+		From:     &models.User{ID: 42},
+		Entities: []models.MessageEntity{{Type: models.MessageEntityTypeBotCommand, Length: len("/search")}},
+	}
+}
+
+func searchPress(t *testing.T, handler tgb.HandlerFunc, tg *tgb.Bot, data string, from int64, reply *models.Message, sent time.Time) {
+	t.Helper()
+	chat := models.Chat{ID: 42, Type: models.ChatTypePrivate}
+	if reply != nil {
+		chat = reply.Chat
+	}
+	handler(t.Context(), tg, &models.Update{CallbackQuery: &models.CallbackQuery{
+		ID:      "query",
+		From:    models.User{ID: from},
+		Data:    data,
+		Message: models.MaybeInaccessibleMessage{Message: &models.Message{ID: 10, Date: int(sent.Unix()), Chat: chat, ReplyToMessage: reply}},
+	}})
+}
+
+func TestSearchPagination(t *testing.T) {
+	a, tg, fake := newSearchTest(t, 19)
+	command := searchCommand(models.Chat{ID: 42, Type: models.ChatTypePrivate})
+	a.handleSearch(t.Context(), tg, &models.Update{Message: command})
+	hash := searchHash("晴天")
+	edited := *command
+	edited.Text = "/search 七里香"
+	for _, press := range []struct {
+		page  int
+		reply *models.Message
+	}{{2, command}, {3, command}, {4, command}, {2, &edited}, {2, nil}} {
+		a.cooldowns = nil
+		searchPress(t, a.handleCallbackSearch, tg, fmt.Sprintf("search %d %s", press.page, hash), 42, press.reply, time.Now())
+	}
+
+	if want := []int{0, 8, 16, 24}; fmt.Sprint(fake.offsets) != fmt.Sprint(want) {
+		t.Errorf("offsets = %v, want %v", fake.offsets, want)
+	}
+	if want := []string{"", "", render.NoMoreResults, render.SearchExpired, render.SearchExpired}; strings.Join(fake.answers, "|") != strings.Join(want, "|") {
+		t.Errorf("answers = %q, want %q", fake.answers, want)
+	}
+	if len(fake.edits) != 3 {
+		t.Fatalf("edits = %d, want 3", len(fake.edits))
+	}
+	for i, tt := range []struct {
+		first, last int
+		pages       []string
+	}{
+		{first: 1, last: 8, pages: []string{"search 2 " + hash}},
+		{first: 9, last: 16, pages: []string{"search 1 " + hash, "search 3 " + hash}},
+		{first: 17, last: 19, pages: []string{"search 2 " + hash}},
+	} {
+		page := i + 1
+		if !strings.HasPrefix(fake.edits[i], render.SearchPage(page, 3)+render.SearchItem(tt.first, fmt.Sprintf("Song %d", tt.first), "Artist")) ||
+			!strings.HasSuffix(fake.edits[i], render.SearchItem(tt.last, fmt.Sprintf("Song %d", tt.last), "Artist")) {
+			t.Errorf("page %d text = %q", page, fake.edits[i])
+		}
+		rows := fake.markups[i].InlineKeyboard
+		songs := rows[0]
+		if len(songs) != tt.last-tt.first+1 || songs[0].Text != strconv.Itoa(tt.first) || songs[0].CallbackData != fmt.Sprintf("music %d", tt.first) {
+			t.Errorf("page %d song buttons = %+v", page, songs)
+		}
+		var pages []string
+		if len(rows) > 1 {
+			for _, button := range rows[1] {
+				pages = append(pages, button.CallbackData)
+			}
+		}
+		if fmt.Sprint(pages) != fmt.Sprint(tt.pages) {
+			t.Errorf("page %d buttons = %v, want %v", page, pages, tt.pages)
+		}
+	}
+}
+
+func TestSearchMaxPage(t *testing.T) {
+	a, tg, fake := newSearchTest(t, 100)
+	command := searchCommand(models.Chat{ID: 42, Type: models.ChatTypePrivate})
+	hash := searchHash("晴天")
+	for page := 5; page <= 6; page++ {
+		a.cooldowns = nil
+		searchPress(t, a.handleCallbackSearch, tg, fmt.Sprintf("search %d %s", page, hash), 42, command, time.Now())
+	}
+	if fmt.Sprint(fake.offsets) != "[32]" || len(fake.markups) != 1 {
+		t.Fatalf("offsets = %v, edits = %d; want only page 5", fake.offsets, len(fake.markups))
+	}
+	if !strings.HasPrefix(fake.edits[0], render.SearchPage(5, 5)+render.SearchItem(33, "Song 33", "Artist")) {
+		t.Errorf("page 5 text = %q", fake.edits[0])
+	}
+	if rows := fake.markups[0].InlineKeyboard; len(rows) != 2 || len(rows[1]) != 1 || rows[1][0].CallbackData != "search 4 "+hash {
+		t.Errorf("page 5 buttons = %+v, want only previous page", rows)
+	}
+	if want := []string{"", render.SearchExpired}; strings.Join(fake.answers, "|") != strings.Join(want, "|") {
+		t.Errorf("answers = %q, want %q", fake.answers, want)
+	}
+}
+
+func TestSearchCallbackChecks(t *testing.T) {
+	group := models.Chat{ID: -100123, Type: models.ChatTypeSupergroup}
+	hash := searchHash("晴天")
+	type press struct {
+		music bool
+		from  int64
+		sent  time.Duration
+	}
+	for _, tt := range []struct {
+		name     string
+		presses  []press
+		want     []string
+		requests int
+		audios   int
+	}{
+		{name: "expired page", presses: []press{{from: 42, sent: -11 * time.Minute}}, want: []string{render.SearchExpired}},
+		{name: "expired music", presses: []press{{music: true, from: 42, sent: -11 * time.Minute}}, want: []string{render.SearchExpired}},
+		{name: "other user page", presses: []press{{from: 7}}, want: []string{render.SearchNotOwner}},
+		{name: "other user music", presses: []press{{music: true, from: 7}}, want: []string{render.SearchNotOwner}},
+		{name: "page cooldown", presses: []press{{from: 42}, {from: 42}}, want: []string{"", render.Cooldown(5)}, requests: 1},
+		{name: "music cooldown", presses: []press{{music: true, from: 42}, {music: true, from: 42}}, want: []string{render.CallbackText, render.Cooldown(10)}, audios: 1},
+		{name: "separate cooldowns", presses: []press{{from: 42}, {music: true, from: 42}}, want: []string{"", render.CallbackText}, requests: 1, audios: 1},
+		{name: "other user not cooled down", presses: []press{{from: 7}, {from: 42}}, want: []string{render.SearchNotOwner, ""}, requests: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a, tg, fake := newSearchTest(t, 19)
+			command := searchCommand(group)
+			for _, p := range tt.presses {
+				handler, data := a.handleCallbackSearch, "search 2 "+hash
+				if p.music {
+					handler, data = a.handleCallbackMusic, "music 1"
+				}
+				searchPress(t, handler, tg, data, p.from, command, time.Now().Add(p.sent))
+			}
+			if strings.Join(fake.answers, "|") != strings.Join(tt.want, "|") {
+				t.Errorf("answers = %q, want %q", fake.answers, tt.want)
+			}
+			if len(fake.offsets) != tt.requests {
+				t.Errorf("search requests = %d, want %d", len(fake.offsets), tt.requests)
+			}
+			if len(fake.audios) != tt.audios {
+				t.Fatalf("audios = %q, want %d", fake.audios, tt.audios)
+			}
+			for _, audio := range fake.audios {
+				if !strings.HasPrefix(audio, "-100123 cached-audio ") || !strings.Contains(audio, `"message_id":1`) {
+					t.Errorf("audio = %q, want cached song in group replying to /search", audio)
+				}
+			}
+		})
+	}
+}
+
+func TestParseSearchArgsProvider(t *testing.T) {
+	a := newTestApp(nil)
+	for _, tt := range []struct {
+		args     string
+		provider string
+		keyword  string
+	}{
+		{args: "ne 晴天", provider: "netease", keyword: "晴天"},
+		{args: "netease 晴天 七里香", provider: "netease", keyword: "晴天 七里香"},
+		{args: "晴天", keyword: "晴天"},
+		{args: "unknown 晴天", keyword: "unknown 晴天"},
+	} {
+		provider, keyword := a.parseSearchArgs(tt.args)
+		if provider != tt.provider || keyword != tt.keyword {
+			t.Errorf("parseSearchArgs(%q) = %q, %q; want %q, %q", tt.args, provider, keyword, tt.provider, tt.keyword)
+		}
+	}
+	// provider:id 形式由 Registry.Match 解析（/rmcache 在 parseRefArg 失败后回退到它）
+	if ref, _, ok := a.providers.Match(context.Background(), "ne:123"); !ok || ref.Provider != "netease" || ref.ID != "123" {
+		t.Errorf("Match(ne:123) = %+v, %v", ref, ok)
+	}
+}
+
+func TestSearchCallbackDataLength(t *testing.T) {
+	a := newTestApp(nil)
+	keyboard := a.searchKeyboard([]provider.Ref{{Provider: "netease", ID: strconv.FormatInt(math.MaxInt64, 10)}}, 33, searchMaxPage-1, true, searchHash(strings.Repeat("晴", 4096)))
+	for _, row := range keyboard.InlineKeyboard {
+		for _, button := range row {
+			if n := len(button.CallbackData); n == 0 || n > 64 {
+				t.Errorf("callback data %q has %d bytes, want 1-64", button.CallbackData, n)
+			}
+		}
+	}
+}

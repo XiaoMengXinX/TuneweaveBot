@@ -1,0 +1,41 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Test pluginsdk
+        run: cd pluginsdk && go test ./...
+      - name: Test plugins
+        run: cd plugins/netease && go test ./...
+      - name: Build
+        run: |
+          sudo timedatectl set-timezone Asia/Shanghai
+          bash build.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TuneweaveBot
+          path: |
+            TuneweaveBot
+            dist/plugins/*.wasm

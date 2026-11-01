@@ -1,0 +1,126 @@
+package main
+
+import "encoding/json"
+
+const (
+	providerName = "netease"
+	displayName  = "网易云音乐"
+	providerCode = "ne"
+)
+
+// Ref 与宿主的 provider.Ref 结构一致。
+type Ref struct {
+	Provider  string `json:"provider,omitempty"`
+	ID        string `json:"id"`
+	Sub       string `json:"sub,omitempty"`
+	URL       string `json:"url,omitempty"`
+	PageURL   string `json:"page_url,omitempty"`
+	ShareText string `json:"share_text,omitempty"`
+}
+
+// Policy 与宿主的 fetch.Policy 结构一致。
+type Policy struct {
+	HostReplace      map[string]string `json:"host_replace,omitempty"`
+	ForceHTTPS       bool              `json:"force_https,omitempty"`
+	ForceMultiThread bool              `json:"force_multi_thread,omitempty"`
+}
+
+// Track 与宿主的 provider.Track 结构一致。
+type Track struct {
+	Ref
+	Title        string            `json:"title"`
+	Artists      []string          `json:"artists"`
+	Album        string            `json:"album"`
+	DurationMS   int               `json:"duration_ms"`
+	CoverURL     string            `json:"cover_url,omitempty"`
+	AudioURL     string            `json:"audio_url,omitempty"`
+	Ext          string            `json:"ext,omitempty"`
+	Size         int64             `json:"size,omitempty"`
+	BitRate      int               `json:"bit_rate,omitempty"`
+	MD5          string            `json:"md5,omitempty"`
+	PageURL      string            `json:"page_url,omitempty"`
+	ShareText    string            `json:"share_text,omitempty"`
+	ProviderName string            `json:"provider_name,omitempty"`
+	TagFormat    string            `json:"tag_format,omitempty"`
+	TagPayload   json.RawMessage   `json:"tag_payload,omitempty"`
+	Download     Policy            `json:"download,omitempty"`
+	Extra        map[string]string `json:"extra,omitempty"`
+}
+
+// TrackSummary 与宿主的 provider.TrackSummary 结构一致。
+type TrackSummary struct {
+	Ref
+	Title      string   `json:"title"`
+	Artists    []string `json:"artists"`
+	Album      string   `json:"album"`
+	DurationMS int      `json:"duration_ms"`
+}
+
+// Lyric 与宿主的 provider.Lyric 结构一致。
+type Lyric struct {
+	LRC     string   `json:"lrc"`
+	Title   string   `json:"title"`
+	Artists []string `json:"artists"`
+	Album   string   `json:"album"`
+}
+
+// Manifest 是插件能力声明。
+type Manifest struct {
+	Name                string    `json:"name"`
+	DisplayName         string    `json:"display_name"`
+	Version             string    `json:"version"`
+	ABI                 int       `json:"abi"`
+	Code                string    `json:"code"`
+	Capabilities        []string  `json:"capabilities"`
+	AuthRequired        bool      `json:"auth_required"`
+	DefaultTagFormat    string    `json:"default_tag_format"`
+	LegacyConfigSection string    `json:"legacy_config_section"`
+	Commands            []Command `json:"commands"`
+	Resources           Resources `json:"resources"`
+	HTTPAllowedHosts    []string  `json:"http_allowed_hosts"`
+}
+
+// Command 是插件声明的命令别名。
+type Command struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Usage       string `json:"usage,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Template    string `json:"template,omitempty"`
+}
+
+// Resources 是插件的资源建议。
+type Resources struct {
+	MemoryMB  int `json:"memory_mb,omitempty"`
+	Instances int `json:"instances,omitempty"`
+}
+
+// Config 是 [plugins.config.netease] 与旧 [netease] 合并后的配置。
+type Config struct {
+	Level string `json:"level"`
+}
+
+// AuthChallenge / AuthState 与宿主的 provider 结构一致。
+type AuthChallenge struct {
+	Type      string `json:"type"`
+	Content   string `json:"content"`
+	Key       string `json:"key"`
+	ExpiresIn int    `json:"expires_in"`
+}
+
+type Persist struct {
+	Section string `json:"section"`
+	Key     string `json:"key"`
+}
+
+type AuthState struct {
+	State      string   `json:"state"`
+	Credential string   `json:"credential,omitempty"`
+	Nickname   string   `json:"nickname,omitempty"`
+	Persist    *Persist `json:"persist,omitempty"`
+}
+
+type AuthStatus struct {
+	Authenticated bool   `json:"authenticated"`
+	Account       string `json:"account,omitempty"`
+}
