@@ -20,7 +20,8 @@ func (a *App) setupCommands(ctx context.Context, tg *tgb.Bot) {
 	adminOnly := []models.BotCommand{
 		{Command: "login", Description: "网易云扫码登录"},
 		{Command: "rmcache", Description: "清除歌曲缓存"},
-		{Command: "reload", Description: "重载配置"},
+		{Command: "reload", Description: "重载配置与插件"},
+		{Command: "checkupdate", Description: "检查插件更新"},
 		{Command: "setcachechat", Description: "设置 Guest Mode 缓存群"},
 	}
 

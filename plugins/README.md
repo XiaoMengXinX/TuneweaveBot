@@ -4,7 +4,7 @@ TuneweaveBot 的核心原则是**宿主对具体平台零知识**：所有与音
 （链接解析、元数据、搜索、歌词、识曲、登录）都在 WASM 插件里，宿主
 （`internal/plugin`）只提供运行时与通用能力，不认识任何一个具体平台。
 
-宿主负责：加载 `.wasm`、维护实例池、施加超时/内存上限、转发 HTTP（带代理与
+宿主负责：加载 `.wasm` / `.wasm.gz`、维护实例池、施加超时/内存上限、转发 HTTP（带代理与
 SSRF 防护）、提供按插件隔离的 KV、把插件能力包装成
 `provider.Provider` / `provider.Recognizer` / `provider.Authenticator`。
 
@@ -25,7 +25,7 @@ cp -r plugins/example plugins/foo        # 复制最小示例
 4. 构建并验证：
 
 ```sh
-NAME=foo bash build-plugins.sh && cp dist/plugins/foo.wasm plugins/
+NAME=foo bash build-plugins.sh && cp dist/plugins/foo.wasm.gz plugins/
 # config.toml 里 [plugins] enabled = ["foo"]，然后 /music foo <ID>
 # （match + resolve 即可点歌；实现 provider.search 后可用 /search foo <关键词>）
 ```
@@ -50,16 +50,17 @@ pluginsdk/            插件 SDK（独立 module，封装 ABI 协议）
 plugins/netease/      官方网易云插件（provider + recognizer + auth）
 plugins/example/      最小 provider 示例
 dist/plugins/         构建产物（不进版本库）
-plugins/*.wasm        运行时加载目录（不进版本库）
+plugins/*.wasm[.gz]   运行时加载目录（不进版本库）
 ```
 
 ```sh
-bash build-plugins.sh              # 构建 netease 到 dist/plugins
+bash build-plugins.sh              # 构建 netease 到 dist/plugins/netease.wasm.gz
 NAME=example bash build-plugins.sh # 构建其他插件
 ```
 
-脚本同时生成 `dist/plugins/version.json`（版本取自插件 `main.go` 的 `pluginVersion`），
-并把 commit 与构建时间注入 manifest。
+产物用 gzip 压缩（约为原来的 1/4），宿主加载时解压，未压缩的 `.wasm` 同样可以直接加载；
+同一插件只能保留一种格式。脚本同时生成 `dist/plugins/version.json`（版本取自插件 `main.go`
+的 `pluginVersion`，sha256 按压缩文件计算），并把 commit 与构建时间注入 manifest。
 
 底层命令：
 
@@ -69,7 +70,7 @@ CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm \
   -o dist/plugins/<name>.wasm ./plugins/<name>
 ```
 
-文件名（去掉 `.wasm`）用于匹配 `[plugins] enabled`。插件通过 manifest 的 `name`
+文件名（去掉 `.wasm` / `.wasm.gz`）用于匹配 `[plugins] enabled`。插件通过 manifest 的 `name`
 注册为 provider，两者通常保持一致。默认 provider 缺失或插件目录为空时宿主拒绝启动。
 
 ---
@@ -183,6 +184,8 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
   "version": "1.0.0",
   "commit": "9620876...",
   "build_time": "2026-11-03T01:40:00Z",
+  "update_url": "https://github.com/<owner>/<repo>/releases/download/plugin/example.wasm.gz",
+  "version_url": "https://github.com/<owner>/<repo>/releases/download/plugin/version.json",
   "abi": 1,
   "code": "ex",
   "capabilities": ["provider", "recognizer", "auth"],
@@ -208,6 +211,13 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 - `commit` / `build_time`：可选，构建所用的 git commit 与构建时间（RFC 3339），显示在
   `/status`。通常用 `-ldflags "-X main.commitSHA=... -X main.buildTime=..."` 在构建时注入，
   `build-plugins.sh` 已自动注入
+- `update_url` / `version_url`：可选，须同时声明。最新 wasm 与 `version.json`
+  （`{"version", "build_time", "commit", "sha256"}`）的下载地址，宿主据此检查和应用更新：
+  远端版本号更大时提示，版本号相同或无法按数字比较时比较构建时间；替换前校验 sha256，以及新 wasm 的 name、version、
+  build_time 与 `version.json` 一致。更新沿用原文件格式（`.wasm` 或 `.wasm.gz`），旧文件备份为同名 `.bak`，新版本加载失败时自动回滚。
+  `build-plugins.sh` 在设置 `RELEASE_URL` 时注入（`$RELEASE_URL/<name>.wasm.gz` 与
+  `$RELEASE_URL/version.json`），发布工作流会传入本仓库 `plugin` release 的地址；本地构建不注入，
+  因而不参与自动更新
 - `commands.type`：`provider`（默认，参数交给该插件）或 `template`（`{args}` 替换后生成链接再解析）
 - `http_allowed_hosts`：为空表示禁止一切 HTTP；支持 `*.example.com` 通配
 - `link_hosts`：`provider.match` 能识别的链接域名（子串匹配）。声明后，像链接的文本只有

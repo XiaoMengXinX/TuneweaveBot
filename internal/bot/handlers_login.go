@@ -156,9 +156,12 @@ func (a *App) runTokenLogin(ctx context.Context, auth provider.Authenticator, m 
 		}
 	}
 	if !ok {
-		if errors.Is(context.Cause(ctx), errLoginCancelled) {
+		switch cause := context.Cause(ctx); {
+		case errors.Is(cause, errLoginCancelled):
 			edit(render.LoginCancelled)
-		} else {
+		case errors.Is(cause, ErrReload):
+			edit(render.LoginReloading)
+		default:
 			edit(render.LoginExpired)
 		}
 		return
@@ -293,8 +296,11 @@ func (a *App) pollQRLogin(ctx context.Context, auth provider.Authenticator, key 
 	for {
 		select {
 		case <-ctx.Done():
-			if errors.Is(context.Cause(ctx), errLoginCancelled) {
+			switch cause := context.Cause(ctx); {
+			case errors.Is(cause, errLoginCancelled):
 				_ = editCaption(render.LoginCancelled, emptyKeyboard())
+			case errors.Is(cause, ErrReload):
+				_ = editCaption(render.LoginReloading, emptyKeyboard())
 			}
 			return
 		case <-deadline:

@@ -14,6 +14,8 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/sirupsen/logrus"
+
+	"github.com/robfig/cron/v3"
 )
 
 // Duration 时长类型，接受 "60s" 这类格式
@@ -99,6 +101,7 @@ type PluginsConfig struct {
 	AllowPrivateNetworks bool     `toml:"allow_private_networks"`
 	Proxy                string   `toml:"proxy"`
 	FSDir                string   `toml:"fs_dir"`
+	UpdateCron           string   `toml:"update_cron"`
 	// Config 保存每个插件的独立配置段 [plugins.<name>]，直接传给对应插件。
 	Config map[string]map[string]any `toml:"-"`
 	// PluginInstances 来自 [plugins.<name>] instances，覆盖全局 instances。
@@ -109,7 +112,7 @@ type PluginsConfig struct {
 var pluginsHostKeys = map[string]bool{
 	"dir": true, "enabled": true, "default": true, "instances": true,
 	"call_timeout": true, "memory_mb": true, "http_max_bytes": true,
-	"allow_private_networks": true, "proxy": true, "fs_dir": true,
+	"allow_private_networks": true, "proxy": true, "fs_dir": true, "update_cron": true,
 }
 
 // HTTPClient 按 [plugins] proxy 构造插件与宿主共用的 HTTP 客户端；
@@ -149,6 +152,7 @@ func Default() *Config {
 			CallTimeout:  Duration(30 * time.Second),
 			MemoryMB:     128,
 			HTTPMaxBytes: 16 << 20,
+			UpdateCron:   "0 4 * * *",
 		},
 		Database: DatabaseConfig{
 			Path: "cache.db",
@@ -292,6 +296,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Plugins.HTTPMaxBytes <= 0 {
 		return fmt.Errorf("配置项 [plugins] http_max_bytes 必须为正整数")
+	}
+	if c.Plugins.UpdateCron != "" {
+		if _, err := cron.ParseStandard(c.Plugins.UpdateCron); err != nil {
+			return fmt.Errorf("配置项 [plugins] update_cron 不合法: %w", err)
+		}
 	}
 	if c.Database.Path == "" {
 		return fmt.Errorf("配置项 [database] path 不能为空")

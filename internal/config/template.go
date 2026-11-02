@@ -22,13 +22,13 @@ func GenerateTemplate(schemas []plugin.PluginConfigSchema) []byte {
 	fmt.Fprintf(&b, "api_url = %s          # 自建 Bot API 时修改\n", strconv.Quote(d.Bot.APIURL))
 	b.WriteString("local_mode = false                      # API 开启 --local 且 bot 可读取其文件目录时启用\n")
 	fmt.Fprintf(&b, "upload_timeout = %s                 # 上传及其他 Telegram API 请求的总超时，须为正时长\n", tomlDuration(d.Bot.UploadTimeout))
-	b.WriteString("admin = []                              # 管理员用户 ID，可用 /rmcache /reload\n")
+	b.WriteString("admin = []                              # 管理员用户 ID，可用 /rmcache /reload /checkupdate\n")
 	b.WriteString("cache_chat = 0                          # 缓存群 ID，Guest Mode 点歌时先把未缓存的歌曲上传到这里；0 为关闭，可用 /setcachechat 设置\n")
 	b.WriteString("debug = false                           # 在终端输出 SDK 调试日志，[log] level 为 debug 时同时写入日志文件\n\n")
 
 	b.WriteString("[plugins]\n")
-	fmt.Fprintf(&b, "dir = %s                   # .wasm 插件目录；构建产物在 dist/plugins\n", strconv.Quote(d.Plugins.Dir))
-	b.WriteString("enabled = []                            # 要加载的插件名（文件名去掉 .wasm）；留空 = 加载目录下全部\n")
+	fmt.Fprintf(&b, "dir = %s                       # 插件目录，支持 .wasm 与 .wasm.gz；构建产物在 dist/plugins\n", strconv.Quote(d.Plugins.Dir))
+	b.WriteString("enabled = []                            # 要加载的插件名（文件名去掉 .wasm / .wasm.gz）；留空 = 加载目录下全部\n")
 	b.WriteString("default = \"\"                             # 默认 provider，/music、/search、/login 未指定时使用\n")
 	fmt.Fprintf(&b, "instances = %d                           # 每个插件常驻的实例数，处理搜索/匹配等轻量调用；可在 [plugins.<name>] 中用 instances 单独覆盖\n", d.Plugins.Instances)
 	fmt.Fprintf(&b, "call_timeout = %s                    # 单次插件调用超时\n", tomlDuration(d.Plugins.CallTimeout))
@@ -36,6 +36,7 @@ func GenerateTemplate(schemas []plugin.PluginConfigSchema) []byte {
 	fmt.Fprintf(&b, "http_max_bytes = %d              # 插件单次 HTTP 响应大小上限\n", d.Plugins.HTTPMaxBytes)
 	b.WriteString("allow_private_networks = false          # 是否允许插件访问/下载私网地址（默认拒绝，防止 SSRF）\n")
 	b.WriteString("proxy = \"\"                               # 所有插件 HTTP 及宿主下载共用的代理，留空保留环境代理\n")
+	fmt.Fprintf(&b, "update_cron = %s                # 自动检查插件更新的 cron 表达式（5 段或 @daily 等），留空关闭\n", strconv.Quote(d.Plugins.UpdateCron))
 
 	for _, s := range schemas {
 		b.WriteString("\n")

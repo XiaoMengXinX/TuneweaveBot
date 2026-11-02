@@ -38,4 +38,4 @@ jobs:
           name: TuneweaveBot
           path: |
             TuneweaveBot
-            dist/plugins/*.wasm
+            dist/plugins/*.wasm.gz

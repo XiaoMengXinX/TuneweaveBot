@@ -1,9 +1,13 @@
 package plugin
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,6 +31,14 @@ type Config struct {
 	Instances map[string]int
 }
 
+// Rollback 记录一次更新后加载失败、已回滚到备份版本的插件。
+type Rollback struct {
+	Name      string
+	Version   string // 回滚后的版本
+	BuildTime string
+	Err       error // 新版本的加载错误
+}
+
 // Manager 管理已加载的插件并提供 provider/auth/recognizer 适配器。
 type Manager struct {
 	runtime     *Runtime
@@ -36,6 +48,7 @@ type Manager struct {
 	registry    *provider.Registry
 	auths       *auth.Manager
 	recognizers []provider.Recognizer
+	rollbacks   []Rollback
 }
 
 // Load 扫描目录、加载插件并装配 registry。
@@ -62,7 +75,7 @@ func (m *Manager) load(ctx context.Context, cfg Config) error {
 		enabled[name] = true
 	}
 	for _, path := range files {
-		name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		name, _ := pluginBaseName(filepath.Base(path))
 		if len(enabled) != 0 && !enabled[name] {
 			continue
 		}
@@ -74,7 +87,7 @@ func (m *Manager) load(ctx context.Context, cfg Config) error {
 		if instances <= 0 {
 			instances = m.runtime.cfg.Instances
 		}
-		p, err := m.runtime.loadPlugin(ctx, path, pluginCfg, instances)
+		p, err := m.loadWithRollback(ctx, name, path, pluginCfg, instances)
 		if err != nil {
 			return fmt.Errorf("加载插件 %s 失败: %w", name, err)
 		}
@@ -138,14 +151,61 @@ func pluginFiles(dir string) ([]string, error) {
 		return nil, fmt.Errorf("读取插件目录 %s 失败: %w", dir, err)
 	}
 	var files []string
+	seen := map[string]string{}
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".wasm") {
+		name, ok := pluginBaseName(entry.Name())
+		if entry.IsDir() || !ok {
 			continue
 		}
+		if other, dup := seen[name]; dup {
+			return nil, fmt.Errorf("插件目录 %s 中同时存在 %s 与 %s，请只保留一个", dir, other, entry.Name())
+		}
+		seen[name] = entry.Name()
 		files = append(files, filepath.Join(dir, entry.Name()))
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// pluginBaseName 去掉插件文件后缀 .wasm 或 .wasm.gz，其他文件返回 false。
+func pluginBaseName(file string) (string, bool) {
+	lower := strings.ToLower(file)
+	for _, ext := range []string{".wasm.gz", ".wasm"} {
+		if strings.HasSuffix(lower, ext) {
+			return file[:len(file)-len(ext)], true
+		}
+	}
+	return "", false
+}
+
+// readPluginFile 读取插件文件，gzip 压缩的内容在此解压。
+func readPluginFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return decompressWasm(data)
+}
+
+func isGzip(data []byte) bool { return len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b }
+
+// decompressWasm 解压 gzip 内容，非 gzip 原样返回；解压后上限 maxPluginWasmBytes。
+func decompressWasm(data []byte) ([]byte, error) {
+	if !isGzip(data) {
+		return data, nil
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("解压插件失败: %w", err)
+	}
+	wasm, err := io.ReadAll(io.LimitReader(zr, maxPluginWasmBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("解压插件失败: %w", err)
+	}
+	if len(wasm) > maxPluginWasmBytes {
+		return nil, fmt.Errorf("插件解压后超过 %d 字节上限", maxPluginWasmBytes)
+	}
+	return wasm, nil
 }
 
 func (m *Manager) Providers() *provider.Registry { return m.registry }
@@ -258,6 +318,40 @@ func (m *Manager) Info() []PluginInfo {
 		})
 	}
 	return out
+}
+
+// Rollbacks 返回本次加载中因新版本加载失败而回滚的插件。
+func (m *Manager) Rollbacks() []Rollback {
+	if m == nil {
+		return nil
+	}
+	return m.rollbacks
+}
+
+// loadWithRollback 加载插件；失败且存在更新前的备份时，恢复备份再加载一次。
+// 新版本加载成功后删除备份。
+func (m *Manager) loadWithRollback(ctx context.Context, name, path string, config json.RawMessage, instances int) (*Plugin, error) {
+	p, err := m.runtime.loadPlugin(ctx, path, config, instances)
+	backup := backupPath(path)
+	if err == nil {
+		if rmErr := os.Remove(backup); rmErr != nil && !os.IsNotExist(rmErr) {
+			m.runtime.log.Warnf("删除插件 %s 的更新备份失败: %v", name, rmErr)
+		}
+		return p, nil
+	}
+	if _, statErr := os.Stat(backup); statErr != nil {
+		return nil, err
+	}
+	if renameErr := os.Rename(backup, path); renameErr != nil {
+		return nil, errors.Join(err, fmt.Errorf("回滚失败: %w", renameErr))
+	}
+	m.runtime.log.Errorf("插件 %s 更新后加载失败，已回滚到更新前的版本: %v", name, err)
+	p, retryErr := m.runtime.loadPlugin(ctx, path, config, instances)
+	if retryErr != nil {
+		return nil, errors.Join(err, fmt.Errorf("回滚后仍加载失败: %w", retryErr))
+	}
+	m.rollbacks = append(m.rollbacks, Rollback{Name: p.manifest.Name, Version: p.manifest.Version, BuildTime: p.manifest.BuildTime, Err: err})
+	return p, nil
 }
 
 func (m *Manager) Close(ctx context.Context) {

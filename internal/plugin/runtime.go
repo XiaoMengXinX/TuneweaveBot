@@ -254,6 +254,7 @@ func (i *instance) call(ctx context.Context, action string, payload, out any) er
 type Plugin struct {
 	runtime      *Runtime
 	manifest     Manifest
+	path         string // 加载时的 wasm 文件路径，更新时原地替换
 	compiled     wazero.CompiledModule
 	config       json.RawMessage
 	allowedHosts []string
@@ -279,7 +280,7 @@ func (p *Plugin) setCred(credential string) {
 }
 
 func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.RawMessage, instances int) (*Plugin, error) {
-	wasm, err := os.ReadFile(wasmPath)
+	wasm, err := readPluginFile(wasmPath)
 	if err != nil {
 		return nil, err
 	}
@@ -287,24 +288,10 @@ func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.R
 	if err != nil {
 		return nil, fmt.Errorf("编译插件 %s 失败: %w", wasmPath, err)
 	}
-	p := &Plugin{runtime: r, compiled: compiled, config: config}
+	p := &Plugin{runtime: r, compiled: compiled, config: config, path: wasmPath}
 
-	// 探测阶段只读 manifest：禁止 HTTP（空白名单）并加超时，防止插件卡住启动
-	probeCtx, cancelProbe := context.WithTimeout(ctx, r.cfg.CallTimeout)
-	defer cancelProbe()
-	probe, err := r.instantiate(probeCtx, p, pluginNameHint(wasmPath), []string{})
+	probe, manifest, err := r.probe(ctx, p, pluginNameHint(wasmPath))
 	if err != nil {
-		_ = compiled.Close(ctx)
-		return nil, err
-	}
-	var manifest Manifest
-	if err := probe.call(probeCtx, "manifest", struct{}{}, &manifest); err != nil {
-		r.discard(ctx, probe)
-		_ = compiled.Close(ctx)
-		return nil, fmt.Errorf("读取插件 manifest 失败: %w", err)
-	}
-	if err := manifest.validate(); err != nil {
-		r.discard(ctx, probe)
 		_ = compiled.Close(ctx)
 		return nil, err
 	}
@@ -354,6 +341,42 @@ func instanceCount(configured, manifestWant int) int {
 		count = hardMax
 	}
 	return count
+}
+
+// probe 实例化一个探测实例并读取、校验 manifest；失败时探测实例已销毁。
+// 探测阶段禁止 HTTP（空白名单）并加超时，防止插件卡住启动。
+func (r *Runtime) probe(ctx context.Context, p *Plugin, nameHint string) (*instance, Manifest, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, r.cfg.CallTimeout)
+	defer cancel()
+	inst, err := r.instantiate(probeCtx, p, nameHint, []string{})
+	if err != nil {
+		return nil, Manifest{}, err
+	}
+	var manifest Manifest
+	if err := inst.call(probeCtx, "manifest", struct{}{}, &manifest); err != nil {
+		r.discard(ctx, inst)
+		return nil, Manifest{}, fmt.Errorf("读取插件 manifest 失败: %w", err)
+	}
+	if err := manifest.validate(); err != nil {
+		r.discard(ctx, inst)
+		return nil, Manifest{}, err
+	}
+	return inst, manifest, nil
+}
+
+// inspect 编译 wasm 并读取其 manifest，用于替换前校验，不保留任何实例。
+func (r *Runtime) inspect(ctx context.Context, wasm []byte, nameHint string) (Manifest, error) {
+	compiled, err := r.rt.CompileModule(ctx, wasm)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("编译插件失败: %w", err)
+	}
+	defer compiled.Close(ctx)
+	inst, manifest, err := r.probe(ctx, &Plugin{runtime: r, compiled: compiled}, nameHint)
+	if err != nil {
+		return Manifest{}, err
+	}
+	r.discard(ctx, inst)
+	return manifest, nil
 }
 
 func (r *Runtime) instantiate(ctx context.Context, p *Plugin, pluginName string, hosts []string) (*instance, error) {
@@ -556,7 +579,8 @@ var hintRe = regexp.MustCompile(`[^a-z0-9_-]+`)
 
 // pluginNameHint 用文件名作为 manifest 读取前的临时命名空间。
 func pluginNameHint(path string) string {
-	name := strings.ToLower(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+	base, _ := pluginBaseName(filepath.Base(path))
+	name := strings.ToLower(base)
 	name = hintRe.ReplaceAllString(name, "")
 	if !nameRe.MatchString(name) {
 		name = "probe"

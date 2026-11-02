@@ -6,7 +6,7 @@ auth（登录）三类能力。
 ## 构建
 
 ```sh
-bash build-plugins.sh   # 输出 dist/plugins/netease.wasm 与 version.json
+bash build-plugins.sh   # 输出 dist/plugins/netease.wasm.gz 与 version.json
 ```
 
 也可直接下载 [plugin](https://github.com/XiaoMengXinX/TuneweaveBot/releases/tag/plugin) release 中的预编译版本。

@@ -24,7 +24,8 @@ TuneweaveBot 是一个 Telegram 点歌机器人。宿主只负责 Telegram 交�
 - 语音识别搜歌（`/recognize`，纯 Go 解析音频，无需 FFmpeg）
 - 登录（管理员 `/login`，支持扫码与回复提交 token/cookie，免手动抓 cookie）
 - Guest Mode：无需把 bot 拉进群，回复分享链接或语音即可点歌/识曲
-- 优雅退出、`/reload` 进程内热重载、下载失败经反代重试
+- 优雅退出、`/reload` 等当前任务完成后在进程内重载配置与插件、下载失败经反代重试
+- 插件自动检查更新（cron 定时或 `/checkupdate`），管理员一键更新后自动重载
 
 ## ⚙️ 构建
 
@@ -40,7 +41,7 @@ GOOS=windows GOARCH=amd64 bash build.sh
 ```
 
 `build.sh` 会同时构建主程序和 WASM 插件：主程序为 `TuneweaveBot`，插件产物在
-`dist/plugins/*.wasm`；运行前把插件放进 `[plugins] dir`（默认 `./plugins`），或把它指向
+`dist/plugins/*.wasm.gz`（gzip 压缩，bot 直接加载）；运行前把插件放进 `[plugins] dir`（默认 `./plugins`），或把它指向
 `dist/plugins`。也可单独构建插件：
 
 ```sh
@@ -80,7 +81,7 @@ concurrency = 4
 
 ```toml
 [plugins]
-dir = "./plugins"          # .wasm 插件目录
+dir = "./plugins"          # 插件目录，支持 .wasm 与 .wasm.gz
 enabled = ["netease"]      # 空 = 加载目录下全部插件
 default = "netease"        # 默认 provider
 instances = 2              # 每个插件常驻的实例数（处理搜索等轻量调用），可在 [plugins.<name>] 中覆盖
@@ -90,6 +91,7 @@ http_max_bytes = 16777216  # 插件单次 HTTP 响应上限
 allow_private_networks = false  # 插件 HTTP 与下载是否允许私网地址（默认拒绝，防 SSRF）
 proxy = ""                 # 所有插件 HTTP 及宿主下载共用的代理，如 http://127.0.0.1:8080 或 socks5://127.0.0.1:1080
 fs_dir = ""                # 只读挂进沙箱的宿主目录，插件按相对路径读文件（如密钥、设备文件）；留空=无文件系统访问
+update_cron = "0 4 * * *"  # 自动检查插件更新的 cron 表达式（5 段或 @daily 等），留空关闭
 
 [plugins.netease]          # 原样传给 netease 插件，宿主不解释其内容
 music_u = "YOUR_MUSIC_U"   # 网易云 cookie 中的 MUSIC_U（可留空，用 /login 登录；下载无损需 VIP）
@@ -106,7 +108,7 @@ level = "hires"            # 优先音质，账号无权限时自动降级
 对应字段，重启后自动复用。
 
 指令菜单每次启动自动注册（无需在 BotFather 手动设置）：普通用户看到 `/music` `/search`
-等公共指令，管理员额外看到 `/login` `/rmcache` `/reload` `/setcachechat`。inline 模式需在
+等公共指令，管理员额外看到 `/login` `/rmcache` `/reload` `/checkupdate` `/setcachechat`。inline 模式需在
 BotFather 手动开启并设置占位文案。
 
 **启动**
@@ -120,8 +122,15 @@ $ ./TuneweaveBot -c config.toml
 bot 启动不依赖任何平台的登录状态。某个 provider 凭据缺失或失效时，该 provider 的
 新歌下载会暂停（已缓存歌曲仍可发送），管理员每 10 分钟收到一次提醒，直到恢复。
 管理员用 `/login [provider]` 扫码登录，或 `/login <provider> token` 回复消息提交
-token/cookie；成功后自动写回配置并恢复下载。管理员发送 `/reload` 可在进程内重载
-配置，无需重启。
+token/cookie；成功后自动写回配置并恢复下载。管理员发送 `/reload` 后，bot 停止接收新消息，
+等当前任务完成后在进程内重新加载配置与插件，无需重启。
+
+**插件更新**：发布构建的插件在 manifest 中带有更新地址。bot 按 `[plugins] update_cron`
+（默认每天 4:00）检查更新：远端版本号更大时提示，版本号相同或无法按数字比较时比较构建时间；发现更新后向管理员
+发送带“立即更新”按钮的消息（24 小时内有效、只能使用一次），也可随时发送 `/checkupdate`。
+点击后下载新插件，校验 sha256 以及 manifest 与 `version.json` 一致，备份旧文件后替换，
+并在当前任务完成后自动重载；新版本加载失败时自动回滚到备份并通知管理员。本地构建的插件
+不带更新地址，不参与自动更新。
 
 **Docker 部署**
 
@@ -137,7 +146,7 @@ docker compose up -d
 ## 🧩 插件开发
 
 宿主只保留 Telegram、缓存、下载、上传、打标和 WASM 运行时，音乐平台相关能力全部由插件提供。
-插件是独立的 Go module，编译为 `.wasm` 后放入 `plugins/` 即可。
+插件是独立的 Go module，编译为 `.wasm`（或 gzip 压缩的 `.wasm.gz`）后放入 `plugins/` 即可。
 
 - SDK：`pluginsdk/`（`pluginsdk.Main`、HTTP/KV/Config 等宿主能力）
 - 官方插件：`plugins/netease/`（网易云音乐，含识曲与登录）
@@ -157,7 +166,8 @@ ABI、action 列表、内存约定和开发步骤见 [`plugins/README.md`](plugi
 - `/status` —— 缓存与插件状态
 - `/about` —— 关于本 bot
 - `/start <ID>` —— 深链点歌（inline 未缓存时引导）
-- 管理员：`/rmcache <ID/链接>` 清除缓存、`/reload` 重载配置、`/login [provider] [token]` 登录、
+- 管理员：`/rmcache <ID/链接>` 清除缓存、`/reload` 重载配置与插件、`/checkupdate` 检查插件更新、
+  `/login [provider] [token]` 登录、
   `/setcachechat [群 ID]` 设置 Guest Mode 缓存群
 - 直接发送分享链接即可嗅探点歌；inline 输入 `help` 查看用法
 

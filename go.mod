@@ -22,6 +22,8 @@ require (
 	github.com/tetratelabs/wazero v1.12.0
 )
 
+require github.com/robfig/cron/v3 v3.0.1 // indirect
+
 require (
 	github.com/bogem/id3v2 v1.2.0
 	github.com/dustin/go-humanize v1.1.0 // indirect

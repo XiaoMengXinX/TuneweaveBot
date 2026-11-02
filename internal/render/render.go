@@ -31,7 +31,7 @@ const (
 	Uploading        = "下载完成, 发送中..."
 	Md5VerFailed     = "MD5校验失败"
 	RetryLater       = "请稍后重试"
-	Reloading        = "重新加载中"
+	Reloading        = "将在当前任务完成后重新加载配置与插件"
 	CallbackText     = "Success"
 	FetchingLyric    = "正在获取歌词中"
 	DownloadFailed   = "下载失败"
@@ -60,12 +60,21 @@ const (
 	LoginExpired     = "登录已过期，请重新发送 /login"
 	LoginCheckFailed = "查询登录状态失败，请稍后重试"
 	LoginCancelled   = "已取消登录"
+	LoginReloading   = "bot 正在重载，登录已中断，请稍后重新 /login"
 	LoginFailed      = "登录失败，请稍后重试"
 	CancelLogin      = "取消登录"
 
 	LoginUnsupported = "当前 Provider 不支持登录"
 	LoginSessionOver = "登录会话已结束，可发送 /login"
 	LoginNoSession   = "当前没有进行中的登录会话，可发送 /login"
+
+	CheckingUpdates    = "正在检查插件更新..."
+	NoPluginUpdates    = "插件均已是最新版本"
+	NoUpdatablePlugins = "没有可检查更新的插件（插件需在 manifest 中声明 update_url 与 version_url）"
+	UpdateNow          = "立即更新"
+	UpdateExpired      = "更新按钮已失效，请重新 /checkupdate"
+	UpdateBusy         = "已有插件更新在进行中"
+	UpdatingPlugins    = "正在下载并校验插件..."
 
 	InputChatID          = "缓存群 ID 须为数字，也可以在目标群内直接发送 /setcachechat"
 	CacheChatTest        = "已设为缓存群，Guest Mode 点歌时会先把未缓存的歌曲上传到这里"
@@ -102,6 +111,61 @@ func LoginOK(nickname string) string {
 		return "登录成功: " + Escape(nickname)
 	}
 	return "登录成功"
+}
+
+// PluginVersion 格式化插件版本，有构建时间时一并显示。
+func PluginVersion(version, buildTime string) string {
+	if buildTime == "" {
+		return "v" + version
+	}
+	return fmt.Sprintf("v%s (%s)", version, buildTime)
+}
+
+// PluginUpdateLine 是更新列表中的一行，from/to 由 PluginVersion 生成。
+func PluginUpdateLine(displayName, name, from, to string) string {
+	return fmt.Sprintf("• %s (%s): %s → %s", Escape(displayName), Escape(name), Escape(from), Escape(to))
+}
+
+// PluginUpdatesAvailable 列出可用更新；checkErr 非空时附上检查失败的插件。
+func PluginUpdatesAvailable(lines []string, validFor, checkErr string) string {
+	text := "发现插件更新：\n" + strings.Join(lines, "\n")
+	if checkErr != "" {
+		text += "\n\n部分插件检查失败：\n<code>" + Escape(checkErr) + "</code>"
+	}
+	return text + "\n\n按钮 " + validFor + " 内有效"
+}
+
+func UpdateCheckFailed(err string) string {
+	return "检查插件更新失败：\n<code>" + Escape(err) + "</code>"
+}
+
+// PluginUpdateResult 汇总更新结果；有插件更新成功时提示将重载。
+func PluginUpdateResult(updated, failed []string) string {
+	var b strings.Builder
+	if len(updated) > 0 {
+		b.WriteString("已更新：\n" + strings.Join(updated, "\n"))
+	}
+	if len(failed) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("未更新：\n" + strings.Join(failed, "\n"))
+	}
+	if len(updated) > 0 {
+		b.WriteString("\n\n将在当前任务完成后重新加载插件")
+	}
+	return b.String()
+}
+
+// PluginRolledBack 通知管理员插件新版本加载失败、已回滚到更新前的版本。
+func PluginRolledBack(displayName, name, version, err string) string {
+	return fmt.Sprintf("插件 %s (%s) 更新后加载失败，已回滚到 %s\n<code>%s</code>",
+		Escape(displayName), Escape(name), Escape(version), Escape(err))
+}
+
+// PluginUpdateFailedLine 是未更新列表中的一行。
+func PluginUpdateFailedLine(displayName, name, reason string) string {
+	return fmt.Sprintf("• %s (%s): %s", Escape(displayName), Escape(name), Escape(reason))
 }
 
 func Escape(s string) string { return html.EscapeString(s) }

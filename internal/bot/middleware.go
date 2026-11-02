@@ -19,6 +19,9 @@ func (a *App) recoverMiddleware(next tgb.HandlerFunc) tgb.HandlerFunc {
 				a.log.Errorf("panic: %v\n%s", r, debug.Stack())
 			}
 		}()
+		if a.workCtx != nil {
+			ctx = a.workCtx
+		}
 		next(ctx, tg, update)
 	}
 }

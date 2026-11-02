@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,8 +16,10 @@ type Manifest struct {
 	Name             string        `json:"name"`
 	DisplayName      string        `json:"display_name"`
 	Version          string        `json:"version"`
-	Commit           string        `json:"commit,omitempty"`     // 构建所用的 git commit
-	BuildTime        string        `json:"build_time,omitempty"` // 构建时间（RFC 3339）
+	Commit           string        `json:"commit,omitempty"`      // 构建所用的 git commit
+	BuildTime        string        `json:"build_time,omitempty"`  // 构建时间（RFC 3339）
+	UpdateURL        string        `json:"update_url,omitempty"`  // 最新 wasm 的下载地址
+	VersionURL       string        `json:"version_url,omitempty"` // 最新版本信息 version.json 的地址
 	ABI              int           `json:"abi"`
 	Code             string        `json:"code"`
 	Capabilities     []string      `json:"capabilities"`
@@ -75,6 +78,14 @@ func (m *Manifest) validate() error {
 	}
 	if !codeRe.MatchString(m.Code) {
 		return fmt.Errorf("插件 %s 的 code %q 不合法", m.Name, m.Code)
+	}
+	if (m.UpdateURL == "") != (m.VersionURL == "") {
+		return fmt.Errorf("插件 %s 的 update_url 与 version_url 须同时声明", m.Name)
+	}
+	for _, u := range []string{m.UpdateURL, m.VersionURL} {
+		if parsed, err := url.Parse(u); u != "" && (err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "") {
+			return fmt.Errorf("插件 %s 的更新地址 %q 不合法", m.Name, u)
+		}
 	}
 	for _, cap := range m.Capabilities {
 		switch cap {

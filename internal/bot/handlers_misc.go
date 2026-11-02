@@ -102,7 +102,7 @@ func (a *App) handleReload(ctx context.Context, tg *tgb.Bot, update *models.Upda
 	if _, err := a.reply(ctx, m, render.Reloading); err != nil {
 		a.log.Errorln(err)
 	}
-	a.reload(ErrReload)
+	a.requestReload()
 }
 
 // handleSetCacheChat 无参数时设为当前聊天，参数为 0 时关闭

@@ -66,10 +66,14 @@ type App struct {
 	cacheChat     atomic.Int64                  // 0 表示未设置缓存群
 	warnMu        sync.Mutex                    // 保护 warnCancels
 	warnCancels   map[string]context.CancelFunc // provider -> 告警循环取消函数
-	reload        context.CancelCauseFunc
-	cooldownMu    sync.Mutex                // 保护 cooldowns
-	cooldowns     map[cooldownKey]time.Time // 冷却截止时间
-	inflight      sync.WaitGroup            // 在途 handler，优雅退出时等待
+	reload        context.CancelCauseFunc       // 停止接收新消息并触发重载
+	workCtx       context.Context               // handler 使用的 context，重载时不取消，进程退出时取消
+	updateMu      sync.Mutex                    // 保护 updateOffers
+	updateOffers  map[string]updateOffer        // 插件更新按钮 token -> 待应用的更新
+	updating      atomic.Bool                   // 同时只进行一次插件更新
+	cooldownMu    sync.Mutex                    // 保护 cooldowns
+	cooldowns     map[cooldownKey]time.Time     // 冷却截止时间
+	inflight      sync.WaitGroup                // 在途 handler，优雅退出时等待
 }
 
 // Run 阻塞运行 bot，返回 true 表示需重载配置
@@ -88,6 +92,9 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
+	// 重载只停止轮询，在途 handler 继续使用 runCtx 直到完成
+	pollCtx, stopPolling := context.WithCancelCause(runCtx)
+	defer stopPolling(nil)
 
 	log.AddHook(expectedErrorHook{})
 
@@ -116,7 +123,9 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 		statusSem:    semaphore.NewWeighted(1),
 		warnCancels:  map[string]context.CancelFunc{},
 		tokenWaiters: map[surfaceKey]chan string{},
-		reload:       cancel,
+		reload:       stopPolling,
+		workCtx:      runCtx,
+		updateOffers: map[string]updateOffer{},
 	}
 
 	opts := []tgb.Option{
@@ -129,7 +138,7 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 		tgb.WithDefaultHandler(a.handleDefault),
 		tgb.WithErrorsHandler(func(err error) {
 			// 停止或重载时中断的轮询请求不是错误
-			if runCtx.Err() == nil {
+			if pollCtx.Err() == nil {
 				log.Errorf("telegram: %v", err)
 			}
 		}),
@@ -160,16 +169,35 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 	a.registerHandlers(tg)
 	a.setupCommands(runCtx, tg)
 	a.checkCredentials(runCtx)
-	go a.watchCookie(runCtx)
-	tg.Start(runCtx)
+	a.notifyRollbacks(runCtx)
+	go a.watchCookie(pollCtx)
+	go a.watchPluginUpdates(pollCtx)
+	tg.Start(pollCtx)
 
-	// 等在途 handler 结束再由 defer 关闭 store 与插件，避免用到已关闭的资源
-	a.waitInflight(30 * time.Second)
-
-	if errors.Is(context.Cause(runCtx), ErrReload) {
+	// 等在途 handler 结束再由 defer 关闭 store 与插件，避免用到已关闭的资源。
+	// 重载时让当前任务正常完成；进程退出时 handler 已随 runCtx 取消，只需短暂等待。
+	reload := runCtx.Err() == nil && errors.Is(context.Cause(pollCtx), ErrReload)
+	if reload {
+		log.Infoln("已停止接收新消息，等待当前任务完成后重载")
+		a.waitInflight(reloadDrainTimeout)
 		return true, nil
 	}
+	a.waitInflight(30 * time.Second)
 	return false, nil
+}
+
+// reloadDrainTimeout 是重载前等待在途任务的上限。
+const reloadDrainTimeout = 10 * time.Minute
+
+// requestReload 停止接收新消息，在途任务完成后重新加载配置与插件。
+// 进行中的登录会话依赖新消息或长时间等待，直接结束。
+func (a *App) requestReload() {
+	a.loginCancelMu.Lock()
+	if a.loginCancel != nil {
+		a.loginCancel(ErrReload)
+	}
+	a.loginCancelMu.Unlock()
+	a.reload(ErrReload)
 }
 
 // waitInflight 最多等待 timeout 让在途 handler 结束。
@@ -204,6 +232,7 @@ func (a *App) registerHandlers(tg *tgb.Bot) {
 	register("status", a.handleStatus)
 	register("rmcache", a.handleRmCache, a.adminOnly)
 	register("reload", a.handleReload, a.adminOnly)
+	register("checkupdate", a.handleCheckUpdate, a.adminOnly)
 	register("login", a.handleLogin, a.adminOnly)
 	register("setcachechat", a.handleSetCacheChat, a.adminOnly)
 
@@ -223,6 +252,7 @@ func (a *App) registerHandlers(tg *tgb.Bot) {
 	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "music ", tgb.MatchTypePrefix, a.handleCallbackMusic)
 	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "search ", tgb.MatchTypePrefix, a.handleCallbackSearch)
 	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "cancellogin", tgb.MatchTypeExact, a.handleCallbackCancelLogin, a.adminOnly)
+	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, updateCallbackPrefix, tgb.MatchTypePrefix, a.handleCallbackUpdate, a.adminOnly)
 	tg.RegisterHandlerMatchFunc(func(u *models.Update) bool { return u.InlineQuery != nil }, a.handleInline)
 	tg.RegisterHandlerMatchFunc(func(u *models.Update) bool { return u.GuestMessage != nil }, a.handleGuest)
 }

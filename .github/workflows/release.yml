@@ -28,6 +28,8 @@ jobs:
       - name: Test plugins
         run: cd plugins/netease && go test ./...
       - name: Build
+        env:
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/plugin
         run: |
           sudo timedatectl set-timezone Asia/Shanghai
           VERSION=${GITHUB_REF_NAME}
@@ -56,6 +58,6 @@ jobs:
         with:
           files: |
             dist/*
-            dist/plugins/*.wasm
+            dist/plugins/*.wasm.gz
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}

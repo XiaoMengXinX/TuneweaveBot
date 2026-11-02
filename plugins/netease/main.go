@@ -21,10 +21,12 @@ func main() {}
 // pluginVersion 也被 build-plugins.sh 读取，写入发布用的 version.json。
 const pluginVersion = "1.0.0"
 
-// 构建时由 -ldflags -X 注入。
+// 构建时由 -ldflags -X 注入；更新地址只在发布构建中注入，本地构建不参与自动更新。
 var (
-	commitSHA string
-	buildTime string
+	commitSHA  string
+	buildTime  string
+	updateURL  string
+	versionURL string
 )
 
 func manifest() Manifest {
@@ -34,6 +36,8 @@ func manifest() Manifest {
 		Version:          pluginVersion,
 		Commit:           commitSHA,
 		BuildTime:        buildTime,
+		UpdateURL:        updateURL,
+		VersionURL:       versionURL,
 		ABI:              pluginsdk.ABI,
 		Code:             providerCode,
 		Capabilities:     []string{"provider", "recognizer", "auth"},
