@@ -4,6 +4,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/pluginsdk"
 )
@@ -97,7 +98,11 @@ func handle(c *pluginsdk.Context) (any, error) {
 		if err := c.Decode(&in); err != nil {
 			return nil, err
 		}
-		return resolve(in.Ref)
+		res, err := resolve(in.Ref)
+		if err == nil {
+			logResolve(c, in.Ref, res)
+		}
+		return res, err
 	case "provider.search":
 		var in struct {
 			Keyword string `json:"keyword"`
@@ -200,4 +205,14 @@ func initPlugin(c *pluginsdk.Context) (any, error) {
 		client.SetMUSICU(credential)
 	}
 	return map[string]any{}, nil
+}
+
+// logResolve 以 debug 级别记录解析到的音频（请求音质、实际格式、码率与大小）或无音源原因。
+func logResolve(c *pluginsdk.Context, ref Ref, res *resolveResult) {
+	if res.NoAudio != nil {
+		c.Log("debug", fmt.Sprintf("netease: 歌曲 %s 无可用音源（code=%d fee=%d）", ref.ID, res.NoAudio.Code, res.NoAudio.Fee))
+		return
+	}
+	t := res.Track
+	c.Log("debug", fmt.Sprintf("netease: 歌曲 %s 请求音质 %s，获得 %s，%dkbps，%.2fMB", ref.ID, client.level, t.Ext, t.BitRate/1000, float64(t.Size)/(1<<20)))
 }

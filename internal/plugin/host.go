@@ -247,6 +247,15 @@ func (s *instanceState) logf(level, message string) {
 	}
 }
 
+func (s *instanceState) logDebug(format string, args ...any) {
+	s.log.WithField("plugin", s.plugin).Debugf(format, args...)
+}
+
+// logURL 去掉 query 与 fragment 后用于日志，避免记录 token 等参数。
+func logURL(u *url.URL) string {
+	return u.Scheme + "://" + u.Host + u.Path
+}
+
 func (s *instanceState) httpRequest(ctx context.Context, in hostHTTPRequest) (*hostHTTPResponse, error) {
 	u, err := url.Parse(in.URL)
 	if err != nil {
@@ -280,8 +289,10 @@ func (s *instanceState) httpRequest(ctx context.Context, in hostHTTPRequest) (*h
 	if in.TimeoutMS > 0 {
 		client.Timeout = time.Duration(in.TimeoutMS) * time.Millisecond
 	}
+	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
+		s.logDebug("HTTP %s %s 失败，耗时 %s: %v", req.Method, logURL(u), time.Since(start).Round(time.Millisecond), err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -291,6 +302,7 @@ func (s *instanceState) httpRequest(ctx context.Context, in hostHTTPRequest) (*h
 	if err != nil {
 		return nil, err
 	}
+	s.logDebug("HTTP %s %s -> %d，%d 字节，耗时 %s", req.Method, logURL(u), resp.StatusCode, len(body), time.Since(start).Round(time.Millisecond))
 	if int64(len(body)) > limit {
 		return nil, fmt.Errorf("response exceeds %d bytes", limit)
 	}

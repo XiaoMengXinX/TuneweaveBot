@@ -33,6 +33,7 @@ func (a *App) watchCookie(ctx context.Context) {
 				status, err := auth.Status(ctx)
 				if err != nil {
 					// 网络错误不视为凭据失效
+					a.log.Warnf("检查 %s 登录状态失败，跳过本轮: %v", name, err)
 					continue
 				}
 				if status.Authenticated {

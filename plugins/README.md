@@ -297,12 +297,16 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 
 | host name | 说明 |
 | --- | --- |
-| `log` | `{level,message}`，宿主加 `[plugin:<name>]` 前缀 |
+| `log` | `{level,message}`，level 为 `debug`/`info`/`warn`/`error`，宿主带上 `plugin=<name>` 字段 |
 | `http.request` | `{method,url,headers,body_b64,timeout_ms}` → `{status,headers,body_b64}` |
 | `kv.get/set/delete/list` | 按插件隔离的 KV（SQLite），保存 cookie/token 等 |
 | `config.get` | 只返回该插件的 `[plugins.<name>]` |
 | `time.now` / `random` | 便利接口（wasip1 下系统时间/熵不可直接用） |
 | `media.open/write/close/abort` | 把插件生成的大音频流式落盘（需声明 `media` 能力），见 §9 |
+
+`[log] level = "debug"` 时，宿主还会记录每次插件调用（action、常驻/临时实例、耗时、错误）
+以及插件发出的每个 HTTP 请求和下载（方法、不含 query 的地址、状态码、大小、耗时）。插件自己的
+debug 日志不要写入 cookie、token 等凭据内容。
 
 `pluginsdk.NewHTTPClient()` 返回一个把请求转发到 `http.request` 的 `*http.Client`，
 依赖 `net/http` 的第三方库（如 `Music163Api-Go`）几乎可以原样跑在插件里。

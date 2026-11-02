@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/fetch"
 )
@@ -53,6 +54,7 @@ func (s *instanceState) mediaDownload(ctx context.Context, in mediaDownloadReque
 	if err := fetch.ValidateURL(in.URL, s.allowPrivate); err != nil {
 		return nil, err
 	}
+	start := time.Now()
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return nil, err
@@ -104,6 +106,7 @@ func (s *instanceState) mediaDownload(ctx context.Context, in mediaDownloadReque
 	if info.Size() > maxMediaBytes {
 		return nil, tooLargeErr
 	}
+	s.logDebug("下载 %s 完成，%d 字节，耗时 %s", logURL(u), info.Size(), time.Since(start).Round(time.Millisecond))
 	return &mediaDownloadResponse{
 		Path: ScratchMount + "/" + fileName,
 		Size: info.Size(),

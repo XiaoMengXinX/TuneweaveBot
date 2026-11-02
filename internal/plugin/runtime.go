@@ -448,7 +448,9 @@ func (p *Plugin) release(inst *instance) {
 }
 
 // call 执行一次插件动作，超时/崩溃的实例会被替换。
-func (p *Plugin) call(ctx context.Context, action string, payload, out any) error {
+func (p *Plugin) call(ctx context.Context, action string, payload, out any) (err error) {
+	start := time.Now()
+	defer func() { p.logCall(action, time.Since(start), err) }()
 	if heavyActions[action] {
 		return p.callFresh(ctx, action, payload, out)
 	}
@@ -473,6 +475,20 @@ func (p *Plugin) call(ctx context.Context, action string, payload, out any) erro
 	p.runtime.discard(context.Background(), inst)
 	p.replace(ctx)
 	return err
+}
+
+// logCall 以 debug 级别记录一次插件调用；临时实例的耗时包含排队等待。
+func (p *Plugin) logCall(action string, d time.Duration, err error) {
+	kind := "常驻实例"
+	if heavyActions[action] {
+		kind = "临时实例"
+	}
+	entry := p.runtime.log.WithField("plugin", p.manifest.Name)
+	if err != nil {
+		entry.Debugf("调用 %s（%s）失败，耗时 %s: %v", action, kind, d.Round(time.Millisecond), err)
+		return
+	}
+	entry.Debugf("调用 %s（%s）完成，耗时 %s", action, kind, d.Round(time.Millisecond))
 }
 
 // heavyActions 是耗时长、内存峰值高的动作，在临时实例中执行。
