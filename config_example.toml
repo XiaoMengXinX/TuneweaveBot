@@ -41,5 +41,5 @@ retries = 3           # 下载失败后的重试次数
 concurrency = 4       # 同时进行的下载/识曲任务数，每个任务占用一个临时插件实例
 
 [log]
-level = "info" # trace/debug/info/warn/error
+level = "info" # debug/info/warn/error
 path = "./log" # 日志目录，按日期切分

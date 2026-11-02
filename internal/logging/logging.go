@@ -73,7 +73,7 @@ func Setup(level, dir string) *logrus.Logger {
 func GormLogger(l *logrus.Logger, level string) logger.Interface {
 	var lvl logger.LogLevel
 	switch level {
-	case "trace", "debug":
+	case "debug":
 		lvl = logger.Info
 	case "info":
 		lvl = logger.Warn

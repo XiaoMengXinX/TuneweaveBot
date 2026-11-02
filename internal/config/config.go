@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
-	"github.com/sirupsen/logrus"
 
 	"github.com/robfig/cron/v3"
 )
@@ -314,8 +313,10 @@ func (c *Config) Validate() error {
 	if c.Download.Concurrency <= 0 {
 		return fmt.Errorf("配置项 [download] concurrency 必须为正整数")
 	}
-	if _, err := logrus.ParseLevel(c.Log.Level); err != nil {
-		return fmt.Errorf("配置项 [log] level %q 不合法", c.Log.Level)
+	switch c.Log.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("配置项 [log] level %q 不合法，可选 debug/info/warn/error", c.Log.Level)
 	}
 	if c.Log.Path == "" {
 		return fmt.Errorf("配置项 [log] path 不能为空")

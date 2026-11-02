@@ -58,7 +58,7 @@ func GenerateTemplate(schemas []plugin.PluginConfigSchema) []byte {
 	fmt.Fprintf(&b, "concurrency = %d                         # 同时进行的下载/识曲任务数，每个任务占用一个临时插件实例\n", d.Download.Concurrency)
 
 	b.WriteString("\n[log]\n")
-	fmt.Fprintf(&b, "level = %s                          # trace/debug/info/warn/error\n", strconv.Quote(d.Log.Level))
+	fmt.Fprintf(&b, "level = %s                          # debug/info/warn/error\n", strconv.Quote(d.Log.Level))
 	fmt.Fprintf(&b, "path = %s                        # 日志目录，按日期切分\n", strconv.Quote(d.Log.Path))
 
 	return []byte(b.String())
