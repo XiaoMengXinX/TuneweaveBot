@@ -18,6 +18,12 @@ import (
 
 var errLoginCancelled = errors.New("login cancelled")
 
+// loginQRValidity 仅用于倒计时，以服务端过期状态为准
+const loginQRValidity = 3 * time.Minute
+
+// tokenLoginBudget 是 token 登录等待用户回复的超时
+const tokenLoginBudget = 3 * time.Minute
+
 func (a *App) handleLogin(ctx context.Context, tg *tgb.Bot, update *models.Update) {
 	m := update.Message
 	if !a.loginMu.TryLock() {
@@ -28,7 +34,7 @@ func (a *App) handleLogin(ctx context.Context, tg *tgb.Bot, update *models.Updat
 	}
 	defer a.loginMu.Unlock()
 
-	providerName := strings.TrimSpace(commandArguments(m))
+	providerName, mode := parseLoginArgs(commandArguments(m))
 	if providerName == "" {
 		providerName = a.providers.DefaultName()
 	} else if p, ok := a.providers.Lookup(providerName); ok {
@@ -41,7 +47,8 @@ func (a *App) handleLogin(ctx context.Context, tg *tgb.Bot, update *models.Updat
 		}
 		return
 	}
-	challenge, err := auth.Begin(ctx)
+
+	challenge, err := auth.Begin(ctx, mode)
 	if err != nil {
 		a.log.Errorln(err)
 		if _, err := a.reply(ctx, m, render.LoginKeyFailed); err != nil {
@@ -49,6 +56,37 @@ func (a *App) handleLogin(ctx context.Context, tg *tgb.Bot, update *models.Updat
 		}
 		return
 	}
+
+	sessCtx, cancelSession := context.WithCancelCause(ctx)
+	defer cancelSession(nil)
+	a.setLoginCancel(cancelSession)
+	defer a.setLoginCancel(nil)
+
+	switch challenge.Type {
+	case "token":
+		a.runTokenLogin(sessCtx, auth, m, challenge)
+	default:
+		a.runQRLogin(sessCtx, auth, m, challenge)
+	}
+}
+
+// parseLoginArgs 解析 /login 参数：provider 名与可选的登录方式（token）。
+func parseLoginArgs(args string) (providerName, mode string) {
+	fields := strings.Fields(args)
+	for _, f := range fields {
+		if f == "token" {
+			mode = "token"
+			continue
+		}
+		if providerName == "" {
+			providerName = f
+		}
+	}
+	return providerName, mode
+}
+
+// runQRLogin 发送二维码并轮询登录结果。
+func (a *App) runQRLogin(ctx context.Context, auth provider.Authenticator, m *models.Message, challenge *provider.AuthChallenge) {
 	png, err := qrcode.Encode(challenge.Content, qrcode.High, 512)
 	if err != nil {
 		a.log.Errorln(err)
@@ -69,11 +107,6 @@ func (a *App) handleLogin(ctx context.Context, tg *tgb.Bot, update *models.Updat
 		a.log.Errorln(err)
 		return
 	}
-
-	sessCtx, cancelSession := context.WithCancelCause(ctx)
-	defer cancelSession(nil)
-	a.setLoginCancel(cancelSession)
-	defer a.setLoginCancel(nil)
 	a.addLoginSurface(m.Chat.ID, photo.ID)
 
 	editCaption := func(text string, markup models.ReplyMarkup) error {
@@ -86,8 +119,61 @@ func (a *App) handleLogin(ctx context.Context, tg *tgb.Bot, update *models.Updat
 		})
 		return err
 	}
+	a.pollQRLogin(ctx, auth, challenge.Key, editCaption)
+}
 
-	a.pollQRLogin(sessCtx, auth, challenge.Key, editCaption)
+// runTokenLogin 提示用户回复 token，捕获后提交校验。
+func (a *App) runTokenLogin(ctx context.Context, auth provider.Authenticator, m *models.Message, challenge *provider.AuthChallenge) {
+	prompt, err := a.tg.SendMessage(ctx, &tgb.SendMessageParams{
+		ChatID:          m.Chat.ID,
+		Text:            challenge.Content,
+		ParseMode:       models.ParseModeHTML,
+		ReplyParameters: &models.ReplyParameters{MessageID: m.ID},
+		ReplyMarkup:     cancelLoginKeyboard(),
+	})
+	if err != nil {
+		a.log.Errorln(err)
+		return
+	}
+	a.addLoginSurface(m.Chat.ID, prompt.ID)
+
+	token, ok := a.waitToken(ctx, m.Chat.ID, prompt.ID)
+	edit := func(text string) {
+		if _, err := a.tg.EditMessageText(ctx, &tgb.EditMessageTextParams{
+			ChatID:      m.Chat.ID,
+			MessageID:   prompt.ID,
+			Text:        text,
+			ParseMode:   models.ParseModeHTML,
+			ReplyMarkup: emptyKeyboard(),
+		}); err != nil {
+			a.log.Errorln(err)
+		}
+	}
+	if !ok {
+		if errors.Is(context.Cause(ctx), errLoginCancelled) {
+			edit(render.LoginCancelled)
+		} else {
+			edit(render.LoginExpired)
+		}
+		return
+	}
+
+	state, err := auth.Submit(ctx, challenge.Key, token)
+	if err != nil {
+		a.log.Errorln(err)
+		edit(render.LoginCheckFailed)
+		return
+	}
+	if state.State != provider.AuthSuccess {
+		edit(render.LoginFailed)
+		return
+	}
+	note, err := a.finishLogin(auth, state)
+	if err != nil {
+		edit(render.LoginFailed + render.Escape(note))
+		return
+	}
+	edit(render.LoginOK(state.Nickname) + render.Escape(note))
 }
 
 func cancelLoginKeyboard() models.InlineKeyboardMarkup {
@@ -174,9 +260,6 @@ func (a *App) handleCallbackCancelLogin(ctx context.Context, tg *tgb.Bot, update
 		a.log.Errorln(err)
 	}
 }
-
-// loginQRValidity 仅用于倒计时，以服务端过期状态为准
-const loginQRValidity = 3 * time.Minute
 
 func (a *App) pollQRLogin(ctx context.Context, auth provider.Authenticator, key string, editCaption func(string, models.ReplyMarkup) error) {
 	ticker := time.NewTicker(time.Second)

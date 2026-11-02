@@ -19,7 +19,7 @@ import (
 )
 
 func TestMessageRef(t *testing.T) {
-	audioKeyboard := musicKeyboard(store.SongInfo{MusicID: 123, SongName: "Song", SongArtists: "Artist", PageURL: songLink(123)}, nil)
+	audioKeyboard := musicKeyboard(store.SongInfo{Provider: "netease", TrackID: "123", SongName: "Song", SongArtists: "Artist", PageURL: songLink(123)}, nil)
 	guestKeyboard := linkKeyboard("网易云音乐", songLink(456))
 	for _, tt := range []struct {
 		name    string
@@ -76,7 +76,7 @@ func TestTemplateCommand(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	a.store = st
-	if err := st.Save(&store.SongInfo{MusicID: 123, SongName: "Song", FileID: "cached-audio"}); err != nil {
+	if err := st.Save(&store.SongInfo{Provider: "netease", TrackID: "123", SongName: "Song", FileID: "cached-audio"}); err != nil {
 		t.Fatal(err)
 	}
 	a.handleTemplateMusic("netease", "https://music.163.com/program?id={args}")(t.Context(), tg, &models.Update{Message: &models.Message{
@@ -133,7 +133,7 @@ func TestProcessCachedProgramKeyboard(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	a.store = st
-	if err := st.Save(&store.SongInfo{MusicID: 123, SongName: "Song", FileID: "cached-audio"}); err != nil {
+	if err := st.Save(&store.SongInfo{Provider: "netease", TrackID: "123", SongName: "Song", FileID: "cached-audio", PageURL: fakeSongPage("123"), ShareText: fakeSongURL("123")}); err != nil {
 		t.Fatal(err)
 	}
 	for _, ref := range []provider.Ref{

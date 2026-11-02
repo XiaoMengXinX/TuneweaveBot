@@ -42,18 +42,13 @@ type BotConfig struct {
 	CacheChat     int64    `toml:"cache_chat"`
 }
 
-type NeteaseConfig struct {
-	MUSICU string `toml:"music_u"`
-	Level  string `toml:"level"`
-	Proxy  string `toml:"proxy"`
-}
-
-func (c NeteaseConfig) proxyURL() (*url.URL, error) {
-	if c.Proxy == "" {
+// proxyURL 校验代理字符串，返回解析结果；空值表示保留默认传输行为。
+func proxyURL(proxy string) (*url.URL, error) {
+	if proxy == "" {
 		return nil, nil
 	}
-	invalid := fmt.Errorf("配置项 [netease] proxy 必须为 http/https/socks5/socks5h 代理 URL，主机名不能为空，端口须为 1..65535，不允许路径、query 或 fragment")
-	u, err := url.Parse(c.Proxy)
+	invalid := fmt.Errorf("配置项 [plugins] proxy 必须为 http/https/socks5/socks5h 代理 URL，主机名不能为空，端口须为 1..65535，不允许路径、query 或 fragment")
+	u, err := url.Parse(proxy)
 	if err != nil {
 		return nil, invalid
 	}
@@ -64,7 +59,7 @@ func (c NeteaseConfig) proxyURL() (*url.URL, error) {
 	}
 	if u.Hostname() == "" || u.Opaque != "" ||
 		(u.EscapedPath() != "" && u.EscapedPath() != "/") ||
-		u.ForceQuery || u.RawQuery != "" || strings.Contains(c.Proxy, "#") ||
+		u.ForceQuery || u.RawQuery != "" || strings.Contains(proxy, "#") ||
 		strings.HasSuffix(u.Host, ":") ||
 		(strings.Contains(u.Hostname(), ":") && !strings.HasPrefix(u.Host, "[")) {
 		return nil, invalid
@@ -78,9 +73,46 @@ func (c NeteaseConfig) proxyURL() (*url.URL, error) {
 	return u, nil
 }
 
-// HTTPClient 要求配置已校验；空代理保留默认传输行为
-func (c NeteaseConfig) HTTPClient() (*http.Client, error) {
-	u, err := c.proxyURL()
+type DatabaseConfig struct {
+	Path string `toml:"path"`
+}
+
+type DownloadConfig struct {
+	Timeout     Duration `toml:"timeout"`
+	Retries     int      `toml:"retries"`
+	Concurrency int      `toml:"concurrency"`
+}
+
+type LogConfig struct {
+	Level string `toml:"level"`
+	Path  string `toml:"path"`
+}
+
+type PluginsConfig struct {
+	Dir                  string   `toml:"dir"`
+	Enabled              []string `toml:"enabled"`
+	Default              string   `toml:"default"`
+	Instances            int      `toml:"instances"`
+	CallTimeout          Duration `toml:"call_timeout"`
+	MemoryMB             int      `toml:"memory_mb"`
+	HTTPMaxBytes         int64    `toml:"http_max_bytes"`
+	AllowPrivateNetworks bool     `toml:"allow_private_networks"`
+	Proxy                string   `toml:"proxy"`
+	// Config 保存每个插件的独立配置段 [plugins.<name>]，直接传给对应插件。
+	Config map[string]map[string]any `toml:"-"`
+}
+
+// pluginsHostKeys 是 [plugins] 段中宿主自身的字段名；其余子表都视为插件配置段。
+var pluginsHostKeys = map[string]bool{
+	"dir": true, "enabled": true, "default": true, "instances": true,
+	"call_timeout": true, "memory_mb": true, "http_max_bytes": true,
+	"allow_private_networks": true, "proxy": true,
+}
+
+// HTTPClient 按 [plugins] proxy 构造插件与宿主共用的 HTTP 客户端；
+// 要求配置已校验，空代理保留默认传输行为。
+func (p PluginsConfig) HTTPClient() (*http.Client, error) {
+	u, err := proxyURL(p.Proxy)
 	if err != nil {
 		return nil, err
 	}
@@ -94,38 +126,8 @@ func (c NeteaseConfig) HTTPClient() (*http.Client, error) {
 	return client, nil
 }
 
-type DatabaseConfig struct {
-	Path string `toml:"path"`
-}
-
-type DownloadConfig struct {
-	Timeout      Duration `toml:"timeout"`
-	Retries      int      `toml:"retries"`
-	Concurrency  int      `toml:"concurrency"`
-	ReverseProxy string   `toml:"reverse_proxy"`
-	AutoRetry    bool     `toml:"auto_retry"`
-}
-
-type LogConfig struct {
-	Level string `toml:"level"`
-	Path  string `toml:"path"`
-}
-
-type PluginsConfig struct {
-	Dir                  string                    `toml:"dir"`
-	Enabled              []string                  `toml:"enabled"`
-	Default              string                    `toml:"default"`
-	Instances            int                       `toml:"instances"`
-	CallTimeout          Duration                  `toml:"call_timeout"`
-	MemoryMB             int                       `toml:"memory_mb"`
-	HTTPMaxBytes         int64                     `toml:"http_max_bytes"`
-	AllowPrivateNetworks bool                      `toml:"allow_private_networks"`
-	Config               map[string]map[string]any `toml:"config"`
-}
-
 type Config struct {
 	Bot      BotConfig      `toml:"bot"`
-	Netease  NeteaseConfig  `toml:"netease"`
 	Plugins  PluginsConfig  `toml:"plugins"`
 	Database DatabaseConfig `toml:"database"`
 	Download DownloadConfig `toml:"download"`
@@ -137,9 +139,6 @@ func Default() *Config {
 		Bot: BotConfig{
 			APIURL:        "https://api.telegram.org",
 			UploadTimeout: Duration(120 * time.Second),
-		},
-		Netease: NeteaseConfig{
-			Level: "hires",
 		},
 		Plugins: PluginsConfig{
 			Dir:          "./plugins",
@@ -155,7 +154,6 @@ func Default() *Config {
 			Timeout:     Duration(60 * time.Second),
 			Retries:     3,
 			Concurrency: 4,
-			AutoRetry:   true,
 		},
 		Log: LogConfig{
 			Level: "info",
@@ -170,14 +168,19 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 先把每个插件的独立段 [plugins.<name>] 从 [plugins] 中剥离，
+	// 使宿主字段仍能走严格模式校验拼写，而子表交给插件按需解释。
+	stripped, sections, err := extractPluginSections(data)
+	if err != nil {
+		return nil, fmt.Errorf("解析 %s 失败: %w", path, err)
+	}
 	cfg := Default()
-	dec := toml.NewDecoder(bytes.NewReader(data))
+	dec := toml.NewDecoder(bytes.NewReader(stripped))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("解析 %s 失败: %w", path, err)
 	}
-	// 先合并文件内的 legacy 段，再应用环境变量，确保环境变量优先级最高
-	mergeLegacyPluginConfig(cfg)
+	cfg.Plugins.Config = sections
 	if err := applyEnv(cfg); err != nil {
 		return nil, err
 	}
@@ -187,17 +190,49 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// mergeLegacyPluginConfig 让 [plugins.config.netease] 覆盖旧 [netease] 段，
-// 使宿主的 HTTP 代理/音质校验与传给插件的配置保持一致。
-func mergeLegacyPluginConfig(c *Config) {
-	values := c.Plugins.Config["netease"]
-	if v, ok := values["level"].(string); ok && v != "" {
-		c.Netease.Level = v
+// extractPluginSections 解析整份文档，收集 [plugins] 下的插件子表 [plugins.<name>]，
+// 返回剔除了这些子表的 TOML（供严格解码只校验 [plugins] 宿主字段）与插件配置段。
+func extractPluginSections(data []byte) ([]byte, map[string]map[string]any, error) {
+	var root map[string]any
+	if err := toml.Unmarshal(data, &root); err != nil {
+		return nil, nil, err
 	}
-	// 空字符串不覆盖，避免 [plugins.config.netease] 里未写 proxy 时清掉 [netease] proxy
-	if v, ok := values["proxy"].(string); ok && v != "" {
-		c.Netease.Proxy = v
+	plugins, ok := root["plugins"].(map[string]any)
+	if !ok {
+		return data, nil, nil
 	}
+	sections := make(map[string]map[string]any)
+	for name, raw := range plugins {
+		if pluginsHostKeys[name] {
+			continue
+		}
+		sub, ok := raw.(map[string]any)
+		if !ok {
+			return nil, nil, fmt.Errorf("配置段 [plugins.%s] 必须为配置表", name)
+		}
+		// 从严格解码的输入中移除插件子表，避免被 DisallowUnknownFields 拒绝
+		delete(plugins, name)
+		sections[name] = sub
+	}
+	if len(sections) == 0 {
+		return data, nil, nil
+	}
+	stripped, err := toml.Marshal(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	return stripped, sections, nil
+}
+
+// setPluginValue 写入 [plugins.<name>] 的某个键，必要时创建段。
+func (c *Config) setPluginValue(name, key string, value any) {
+	if c.Plugins.Config == nil {
+		c.Plugins.Config = make(map[string]map[string]any)
+	}
+	if c.Plugins.Config[name] == nil {
+		c.Plugins.Config[name] = make(map[string]any)
+	}
+	c.Plugins.Config[name][key] = value
 }
 
 // Validate 允许 music_u 为空，由启动流程引导登录
@@ -211,12 +246,7 @@ func (c *Config) Validate() error {
 	if c.Bot.UploadTimeout <= 0 {
 		return fmt.Errorf("配置项 [bot] upload_timeout 必须为正时长")
 	}
-	switch c.Netease.Level {
-	case "standard", "higher", "lossless", "hires", "jyeffect", "sky", "jymaster":
-	default:
-		return fmt.Errorf("配置项 [netease] level %q 不合法（可选 standard/higher/lossless/hires/jyeffect/sky/jymaster）", c.Netease.Level)
-	}
-	if _, err := c.Netease.proxyURL(); err != nil {
+	if _, err := proxyURL(c.Plugins.Proxy); err != nil {
 		return err
 	}
 	for _, id := range c.Bot.Admin {
@@ -276,7 +306,8 @@ func applyEnv(cfg *Config) error {
 	return applyPluginEnv(cfg)
 }
 
-// applyPluginEnv 支持 TUNEWEAVE_PLUGINS_CONFIG_<NAME>_<KEY>（字符串值）。
+// applyPluginEnv 支持 TUNEWEAVE_PLUGINS_CONFIG_<NAME>_<KEY>（字符串值），
+// 覆盖 [plugins.<name>] 段中的键；前缀保留 CONFIG 以免与 [plugins] 宿主字段冲突。
 func applyPluginEnv(cfg *Config) error {
 	const prefix = "TUNEWEAVE_PLUGINS_CONFIG_"
 	for _, env := range os.Environ() {
@@ -291,13 +322,7 @@ func applyPluginEnv(cfg *Config) error {
 		}
 		name := strings.ToLower(rest[:i])
 		keyName := strings.ToLower(rest[i+1:])
-		if cfg.Plugins.Config == nil {
-			cfg.Plugins.Config = make(map[string]map[string]any)
-		}
-		if cfg.Plugins.Config[name] == nil {
-			cfg.Plugins.Config[name] = make(map[string]any)
-		}
-		cfg.Plugins.Config[name][keyName] = value
+		cfg.setPluginValue(name, keyName, value)
 	}
 	return nil
 }
@@ -313,7 +338,7 @@ func walkStruct(v reflect.Value, path string, fn func(reflect.Value, string) err
 		envName := envPrefix + strings.ToUpper(path+name)
 		fv := v.Field(i)
 		if fv.Kind() == reflect.Map {
-			// 插件配置用 TUNEWEAVE_PLUGINS_CONFIG_<NAME>_<KEY> 单独处理
+			// 插件配置段用 TUNEWEAVE_PLUGINS_CONFIG_<NAME>_<KEY> 单独处理
 			continue
 		}
 		// 嵌套配置段递归展开；Duration 的底层是 Int64，不会进入此分支

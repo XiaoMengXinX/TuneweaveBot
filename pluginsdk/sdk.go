@@ -1,4 +1,4 @@
-// Package pluginsdk 是 Music163bot WASM 插件的 Go SDK。
+// Package pluginsdk 是 TuneweaveBot WASM 插件的 Go SDK。
 //
 // 插件作者只需实现一个 Handler 并在 init 中调用 Main（c-shared reactor
 // 不会执行 main，init 会在宿主调用 _initialize 时运行）：

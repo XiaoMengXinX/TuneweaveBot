@@ -8,7 +8,7 @@ import (
 )
 
 func TestEscapeInTemplates(t *testing.T) {
-	caption := MusicCaption("<b>歌名&</b>", "歌手", "专辑", "mp3", 1.5, 320, "网易云音乐", "Music163bot")
+	caption := MusicCaption("<b>歌名&</b>", "歌手", "专辑", "mp3", 1.5, 320, "网易云音乐", "TuneweaveBot")
 	if strings.Contains(caption, "<b>歌名") {
 		t.Errorf("caption 未转义: %s", caption)
 	}
@@ -23,7 +23,7 @@ func TestEscapeInTemplates(t *testing.T) {
 	if got := RecognizeResult("雨き声残響", "ゆめこ & <歌手>", "最新热歌慢摇92"); got != "🎵 识别成功\n「雨き声残響」- ゆめこ &amp; &lt;歌手&gt;\n专辑: 最新热歌慢摇92" {
 		t.Errorf("识曲结果格式错误: %s", got)
 	}
-	if caption != "「&lt;b&gt;歌名&amp;&lt;/b&gt;」- 歌手\n专辑: 专辑\n#网易云音乐 #mp3 1.50MB 320.00kbps\nvia @Music163bot" {
+	if caption != "「&lt;b&gt;歌名&amp;&lt;/b&gt;」- 歌手\n专辑: 专辑\n#网易云音乐 #mp3 1.50MB 320.00kbps\nvia @TuneweaveBot" {
 		t.Errorf("caption 格式错误: %s", caption)
 	}
 

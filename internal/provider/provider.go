@@ -75,11 +75,11 @@ type AuthStatus struct {
 	Account       string
 }
 
-// AuthChallenge 是扫码登录等认证流程的起始信息。
+// AuthChallenge 是扫码/链接/token 等认证流程的起始信息。
 type AuthChallenge struct {
-	Type      string // qr
-	Content   string // 二维码内容
-	Key       string // 轮询 key
+	Type      string // qr | link | token
+	Content   string // qr：二维码内容；link：打开的链接；token：给用户的提示文案
+	Key       string // 轮询或提交 key
 	ExpiresIn int    // 秒
 }
 
@@ -101,7 +101,8 @@ type AuthState struct {
 type Authenticator interface {
 	Name() string
 	Status(ctx context.Context) (AuthStatus, error)
-	Begin(ctx context.Context) (*AuthChallenge, error)
+	Begin(ctx context.Context, mode string) (*AuthChallenge, error)
 	Poll(ctx context.Context, key string) (*AuthState, error)
+	Submit(ctx context.Context, key, token string) (*AuthState, error)
 	Apply(ctx context.Context, credential string) error
 }

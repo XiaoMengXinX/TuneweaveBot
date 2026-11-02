@@ -40,3 +40,5 @@ cache.db*
 /dist/
 plugins/*.wasm
 plugins/.secret.key
+plugins/example/example
+plugins/netease/netease

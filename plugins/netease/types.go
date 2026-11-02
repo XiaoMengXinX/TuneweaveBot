@@ -66,18 +66,27 @@ type Lyric struct {
 
 // Manifest 是插件能力声明。
 type Manifest struct {
-	Name                string    `json:"name"`
-	DisplayName         string    `json:"display_name"`
-	Version             string    `json:"version"`
-	ABI                 int       `json:"abi"`
-	Code                string    `json:"code"`
-	Capabilities        []string  `json:"capabilities"`
-	AuthRequired        bool      `json:"auth_required"`
-	DefaultTagFormat    string    `json:"default_tag_format"`
-	LegacyConfigSection string    `json:"legacy_config_section"`
-	Commands            []Command `json:"commands"`
-	Resources           Resources `json:"resources"`
-	HTTPAllowedHosts    []string  `json:"http_allowed_hosts"`
+	Name             string        `json:"name"`
+	DisplayName      string        `json:"display_name"`
+	Version          string        `json:"version"`
+	ABI              int           `json:"abi"`
+	Code             string        `json:"code"`
+	Capabilities     []string      `json:"capabilities"`
+	AuthRequired     bool          `json:"auth_required"`
+	DefaultTagFormat string        `json:"default_tag_format"`
+	Commands         []Command     `json:"commands"`
+	Resources        Resources     `json:"resources"`
+	HTTPAllowedHosts []string      `json:"http_allowed_hosts"`
+	ConfigSchema     []ConfigField `json:"config_schema,omitempty"`
+}
+
+// ConfigField 声明 [plugins.netease] 段的一个配置项，含义与宿主一致。
+type ConfigField struct {
+	Key     string `json:"key"`
+	Type    string `json:"type"`
+	Default any    `json:"default,omitempty"`
+	Comment string `json:"comment,omitempty"`
+	Secret  bool   `json:"secret,omitempty"`
 }
 
 // Command 是插件声明的命令别名。
@@ -95,9 +104,10 @@ type Resources struct {
 	Instances int `json:"instances,omitempty"`
 }
 
-// Config 是 [plugins.config.netease] 与旧 [netease] 合并后的配置。
+// Config 是 [plugins.netease] 段传入的配置。
 type Config struct {
-	Level string `json:"level"`
+	MusicU string `json:"music_u"`
+	Level  string `json:"level"`
 }
 
 // AuthChallenge / AuthState 与宿主的 provider 结构一致。

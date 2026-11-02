@@ -12,14 +12,10 @@ import (
 
 // track 非 nil 时使用本次解析的页面链接（如节目页）；分享按钮始终使用规范歌曲链接。
 func musicKeyboard(songInfo store.SongInfo, track *provider.Track) models.InlineKeyboardMarkup {
-	// 缓存歌曲沿用旧版链接：打开按钮用分享链接，分享按钮用查询链接
+	// 打开按钮用分享链接，分享按钮用查询链接
 	share := songInfo.ShareText
 	if share == "" {
 		share = songInfo.PageURL
-	}
-	// 兼容没有 ShareText/PageURL 的旧网易云缓存行
-	if share == "" && songInfo.MusicID != 0 && (songInfo.Provider == "" || songInfo.Provider == "netease") {
-		share = fmt.Sprintf("https://music.163.com/song?id=%d", songInfo.MusicID)
 	}
 	link := share
 	if track != nil {

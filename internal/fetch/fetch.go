@@ -25,26 +25,21 @@ type Request struct {
 }
 
 type Progress struct {
-	Attempt  int    // 第几次尝试，从 1 开始
-	ViaProxy bool   // 是否经由反代
-	Written  int64  // 已下载字节
-	Total    int64  // 文件总大小
-	Speed    string // 最近 500ms 的速度
+	Attempt int    // 第几次尝试，从 1 开始
+	Written int64  // 已下载字节
+	Total   int64  // 文件总大小
+	Speed   string // 最近 500ms 的速度
 }
 
 type Downloader struct {
-	d         *downloader.Downloader
-	retries   int
-	proxy     string
-	autoRetry bool
+	d       *downloader.Downloader
+	retries int
 }
 
-func New(savePath string, timeout time.Duration, retries int, proxy string, autoRetry bool) *Downloader {
+func New(savePath string, timeout time.Duration, retries int) *Downloader {
 	return &Downloader{
-		d:         downloader.NewDownloader().SetSavePath(savePath).SetBreakPoint(true).SetTimeOut(timeout),
-		retries:   retries,
-		proxy:     proxy,
-		autoRetry: autoRetry,
+		d:       downloader.NewDownloader().SetSavePath(savePath).SetBreakPoint(true).SetTimeOut(timeout),
+		retries: retries,
 	}
 }
 
@@ -84,11 +79,7 @@ func (dl *Downloader) DownloadMusic(ctx context.Context, req Request, progress f
 	attempts := dl.retries + 1
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		viaProxy := attempt > 1 && dl.proxy != "" && dl.autoRetry
-		if viaProxy && attempt == 2 {
-			task.WithResolvedIpOnHost(dl.proxy)
-		}
-		lastErr = dl.watch(ctx, task, attempt, viaProxy, progress)
+		lastErr = dl.watch(ctx, task, attempt, progress)
 		if lastErr == nil {
 			return nil
 		}
@@ -101,7 +92,7 @@ func (dl *Downloader) DownloadMusic(ctx context.Context, req Request, progress f
 	return lastErr
 }
 
-func (dl *Downloader) watch(ctx context.Context, task *downloader.DownloadTask, attempt int, viaProxy bool, progress func(Progress)) error {
+func (dl *Downloader) watch(ctx context.Context, task *downloader.DownloadTask, attempt int, progress func(Progress)) error {
 	errCh := task.DownloadWithChannel()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -117,11 +108,10 @@ func (dl *Downloader) watch(ctx context.Context, task *downloader.DownloadTask, 
 			written, total := task.GetWrittenBytes(), task.GetFileSize()
 			if total != 0 && written != 0 {
 				progress(Progress{
-					Attempt:  attempt,
-					ViaProxy: viaProxy,
-					Written:  written,
-					Total:    total,
-					Speed:    task.CalculateSpeed(time.Millisecond * 500),
+					Attempt: attempt,
+					Written: written,
+					Total:   total,
+					Speed:   task.CalculateSpeed(time.Millisecond * 500),
 				})
 			}
 		}

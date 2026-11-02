@@ -44,7 +44,7 @@ func TestDownloadFile(t *testing.T) {
 	defer srv.Close()
 
 	dir := t.TempDir()
-	dl := New(dir, 10*time.Second, 0, "", false)
+	dl := New(dir, 10*time.Second, 0)
 	if err := dl.DownloadFile(srv.URL+"/cover.jpg", "cover.jpg"); err != nil {
 		t.Fatal(err)
 	}
@@ -54,28 +54,19 @@ func TestDownloadFile(t *testing.T) {
 	}
 }
 
-func TestDownloadMusicRetryViaProxy(t *testing.T) {
+func TestDownloadMusicRetrySucceeds(t *testing.T) {
 	for _, retries := range []int{1, 2, 3} {
 		t.Run(fmt.Sprintf("retries=%d", retries), func(t *testing.T) {
-			origin := httptest.NewTLSServer(http.NotFoundHandler())
-			defer origin.Close()
-			originHost := strings.TrimPrefix(origin.URL, "https://")
-
 			var attempts atomic.Int32
 			data := []byte("music-data-0123456789")
-			proxy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Host != originHost {
-					t.Errorf("反代请求应保留原 Host: got %q, want %q", r.Host, originHost)
-				}
-				if r.URL.RequestURI() != "/song.mp3?token=test" {
-					t.Errorf("反代请求路径错误: %s", r.URL.RequestURI())
-				}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Accept-Ranges", "bytes")
 				if r.Method == http.MethodHead {
 					attempts.Add(1)
 					w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 					return
 				}
+				// 前几次尝试返回 500，最后一次成功，验证重试逻辑
 				if attempts.Load() < int32(retries) {
 					w.WriteHeader(http.StatusInternalServerError)
 					return
@@ -92,17 +83,16 @@ func TestDownloadMusicRetryViaProxy(t *testing.T) {
 				}
 				_, _ = w.Write(data)
 			}))
-			defer proxy.Close()
-			proxyHost := strings.TrimPrefix(proxy.URL, "https://")
+			defer srv.Close()
 
 			dir := t.TempDir()
-			dl := New(dir, 10*time.Second, retries, proxyHost, true)
-			err := dl.DownloadMusic(context.Background(), Request{URL: origin.URL + "/song.mp3?token=test", FileName: "song.mp3", Policy: Policy{ForceHTTPS: true, ForceMultiThread: true}}, func(Progress) {})
+			dl := New(dir, 10*time.Second, retries)
+			err := dl.DownloadMusic(context.Background(), Request{URL: srv.URL + "/song.mp3?token=test", FileName: "song.mp3", Policy: Policy{ForceMultiThread: true}}, func(Progress) {})
 			if err != nil {
-				t.Fatalf("经反代重试后应成功: %v", err)
+				t.Fatalf("重试后应成功: %v", err)
 			}
 			if got := attempts.Load(); got != int32(retries) {
-				t.Errorf("反代尝试次数错误: got %d, want %d", got, retries)
+				t.Errorf("尝试次数错误: got %d, want %d", got, retries)
 			}
 			got, err := os.ReadFile(filepath.Join(dir, "song.mp3"))
 			if err != nil || string(got) != string(data) {
@@ -113,11 +103,8 @@ func TestDownloadMusicRetryViaProxy(t *testing.T) {
 }
 
 func TestDownloadMusicAllFail(t *testing.T) {
-	origin := httptest.NewTLSServer(http.NotFoundHandler())
-	defer origin.Close()
-
 	var heads, gets atomic.Int32
-	proxy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodHead:
 			heads.Add(1)
@@ -128,21 +115,20 @@ func TestDownloadMusicAllFail(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer proxy.Close()
+	defer srv.Close()
 
 	dir := t.TempDir()
 	const retries = 2
-	dl := New(dir, 10*time.Second, retries, strings.TrimPrefix(proxy.URL, "https://"), true)
-	dl.d.SetNoProxy()
-	err := dl.DownloadMusic(context.Background(), Request{URL: origin.URL + "/song.mp3", FileName: "song.mp3", Policy: Policy{ForceHTTPS: true, ForceMultiThread: true}}, func(Progress) {})
+	dl := New(dir, 10*time.Second, retries)
+	err := dl.DownloadMusic(context.Background(), Request{URL: srv.URL + "/song.mp3", FileName: "song.mp3", Policy: Policy{ForceMultiThread: true}}, func(Progress) {})
 	if err == nil || !strings.Contains(err.Error(), "unexpected HTTP status: 500") {
 		t.Fatalf("全部失败应返回 HTTP 500 错误, got %v", err)
 	}
-	if got := heads.Load(); got != retries {
-		t.Errorf("反代 HEAD 次数错误: got %d, want %d", got, retries)
+	if got := heads.Load(); got != retries+1 {
+		t.Errorf("HEAD 次数错误: got %d, want %d", got, retries+1)
 	}
-	if got := gets.Load(); got != retries {
-		t.Errorf("反代 HTTP 500 GET 次数错误: got %d, want %d", got, retries)
+	if got := gets.Load(); got != retries+1 {
+		t.Errorf("HTTP 500 GET 次数错误: got %d, want %d", got, retries+1)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -154,13 +140,10 @@ func TestDownloadMusicAllFail(t *testing.T) {
 }
 
 func TestDownloadMusicContextCancel(t *testing.T) {
-	origin := httptest.NewTLSServer(http.NotFoundHandler())
-	defer origin.Close()
-
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var gets atomic.Int32
-	proxy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodHead:
 			// HEAD 立即返回，1 字节长度避免启动多个分段 GET
@@ -177,12 +160,11 @@ func TestDownloadMusicContextCancel(t *testing.T) {
 			t.Errorf("意外的请求方法: %s", r.Method)
 		}
 	}))
-	defer proxy.Close()
+	defer srv.Close()
 	defer close(release)
 
 	dir := t.TempDir()
-	dl := New(dir, 10*time.Second, 3, strings.TrimPrefix(proxy.URL, "https://"), true)
-	dl.d.SetNoProxy()
+	dl := New(dir, 10*time.Second, 3)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	go func() {
@@ -192,7 +174,7 @@ func TestDownloadMusicContextCancel(t *testing.T) {
 		case <-ctx.Done():
 		}
 	}()
-	if err := dl.DownloadMusic(ctx, Request{URL: origin.URL + "/song.mp3", FileName: "song.mp3", Policy: Policy{ForceHTTPS: true, ForceMultiThread: true}}, func(Progress) {}); !errors.Is(err, context.Canceled) {
+	if err := dl.DownloadMusic(ctx, Request{URL: srv.URL + "/song.mp3", FileName: "song.mp3", Policy: Policy{ForceMultiThread: true}}, func(Progress) {}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("GET 开始后取消应返回 context.Canceled, got %v", err)
 	}
 	if got := gets.Load(); got != 1 {

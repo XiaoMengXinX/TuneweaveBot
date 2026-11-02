@@ -245,7 +245,7 @@ func TestGuestRecognize(t *testing.T) {
 			t.Cleanup(func() { _ = st.Close() })
 			a.store = st
 			if tt.cached {
-				if err := st.Save(&store.SongInfo{MusicID: 123, SongName: name, SongArtists: artists, SongAlbum: album}); err != nil {
+				if err := st.Save(&store.SongInfo{Provider: fakeProviderName, TrackID: "123", SongName: name, SongArtists: artists, SongAlbum: album}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -354,7 +354,7 @@ func TestGuestRecognizeDispatch(t *testing.T) {
 
 func TestGuestMusic(t *testing.T) {
 	const link = "https://music.163.com/song?id=123&userid=1"
-	cachedInfo := store.SongInfo{MusicID: 123, SongName: "<Song>", SongArtists: "A&B", SongAlbum: "Album", FileExt: "flac", FileID: "cached-audio", MusicSize: 1024 * 1024}
+	cachedInfo := store.SongInfo{Provider: "netease", TrackID: "123", SongName: "<Song>", SongArtists: "A&B", SongAlbum: "Album", FileExt: "flac", FileID: "cached-audio", MusicSize: 1024 * 1024}
 	for _, tt := range []struct {
 		name          string
 		message       *models.Message
@@ -429,13 +429,10 @@ func TestGuestMusic(t *testing.T) {
 
 func TestGuestMusicCacheChat(t *testing.T) {
 	audio := append([]byte("ID3\x03\x00\x00\x00\x00\x00\x00"), bytes.Repeat([]byte{0xff, 0xfb, 0x90, 0x64}, 256)...)
-	music := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	music := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.ServeContent(w, r, "123.mp3", time.Time{}, bytes.NewReader(audio))
 	}))
 	t.Cleanup(music.Close)
-	// 下载器只在经反代时跳过证书校验，源站失败后改由反代返回测试音频
-	origin := httptest.NewTLSServer(http.NotFoundHandler())
-	t.Cleanup(origin.Close)
 	for _, tt := range []struct {
 		name          string
 		cacheChat     int64
@@ -459,7 +456,7 @@ func TestGuestMusicCacheChat(t *testing.T) {
 			a.cfg.Plugins.AllowPrivateNetworks = true // 测试下载源在 127.0.0.1
 			a.cacheDir = t.TempDir()
 			a.http = &http.Client{}
-			a.dl = fetch.New(a.cacheDir, 10*time.Second, 1, strings.TrimPrefix(music.URL, "https://"), true)
+			a.dl = fetch.New(a.cacheDir, 10*time.Second, 1)
 			a.musicSem = semaphore.NewWeighted(1)
 			a.cacheChat.Store(tt.cacheChat)
 			st, err := store.Open(filepath.Join(t.TempDir(), "cache.db"), logger.Discard)
@@ -486,7 +483,7 @@ func TestGuestMusicCacheChat(t *testing.T) {
 					DurationMS:   1000,
 					ProviderName: fakeProviderDisplay,
 					ShareText:    fakeSongURL("123"),
-					AudioURL:     origin.URL + "/123.mp3",
+					AudioURL:     music.URL + "/123.mp3",
 					Size:         int64(len(audio)),
 					Ext:          "mp3",
 					Ref:          provider.Ref{Provider: fakeProviderName, ID: "123"},
@@ -514,7 +511,7 @@ func TestGuestMusicCacheChat(t *testing.T) {
 			if metadataCalls != tt.wantMetadata {
 				t.Errorf("metadata calls = %d, want %d", metadataCalls, tt.wantMetadata)
 			}
-			info, cached := st.GetByMusicID(123)
+			info, cached := st.GetByRef("netease", "123")
 			if !tt.wantUpload {
 				fake.checkAnswerLink(t, "query", tt.wantText, link)
 				if len(fake.uploads) != 0 || cached {

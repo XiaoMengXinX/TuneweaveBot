@@ -1,4 +1,4 @@
-// Command netease 是 Music163bot 的网易云音乐 WASM 插件。
+// Command netease 是 TuneweaveBot 的网易云音乐 WASM 插件。
 package main
 
 import (
@@ -20,15 +20,14 @@ func main() {}
 
 func manifest() Manifest {
 	return Manifest{
-		Name:                providerName,
-		DisplayName:         displayName,
-		Version:             "1.0.0",
-		ABI:                 pluginsdk.ABI,
-		Code:                providerCode,
-		Capabilities:        []string{"provider", "recognizer", "auth"},
-		AuthRequired:        true,
-		DefaultTagFormat:    "netease163key",
-		LegacyConfigSection: "netease",
+		Name:             providerName,
+		DisplayName:      displayName,
+		Version:          "1.0.0",
+		ABI:              pluginsdk.ABI,
+		Code:             providerCode,
+		Capabilities:     []string{"provider", "recognizer", "auth"},
+		AuthRequired:     true,
+		DefaultTagFormat: "netease163key",
 		Commands: []Command{
 			{Name: "netease", Description: "使用网易云音乐点歌"},
 			{Name: "program", Description: "按节目 ID 点歌", Type: "template", Template: "https://music.163.com/program?id={args}"},
@@ -39,6 +38,10 @@ func manifest() Manifest {
 			"interface.music.163.com",
 			"163cn.tv",
 			"163cn.link",
+		},
+		ConfigSchema: []ConfigField{
+			{Key: "music_u", Type: "string", Default: "", Secret: true, Comment: "网易云登录 Cookie（MUSIC_U），留空则用 /login 扫码或提交 token 登录"},
+			{Key: "level", Type: "string", Default: "hires", Comment: "音质: standard/higher/lossless/hires/jyeffect/sky/jymaster，账号无权限时自动降级"},
 		},
 	}
 }
@@ -117,7 +120,13 @@ func handle(c *pluginsdk.Context) (any, error) {
 	case "auth.status":
 		return authStatus()
 	case "auth.begin":
-		return authBegin()
+		var in struct {
+			Mode string `json:"mode"`
+		}
+		if err := c.Decode(&in); err != nil {
+			return nil, err
+		}
+		return authBegin(in.Mode)
 	case "auth.poll":
 		var in struct {
 			Key string `json:"key"`
@@ -126,6 +135,14 @@ func handle(c *pluginsdk.Context) (any, error) {
 			return nil, err
 		}
 		return authPoll(in.Key)
+	case "auth.submit":
+		var in struct {
+			Token string `json:"token"`
+		}
+		if err := c.Decode(&in); err != nil {
+			return nil, err
+		}
+		return authSubmit(in.Token)
 	case "auth.apply":
 		var in struct {
 			Credential string `json:"credential"`
@@ -158,11 +175,10 @@ func initPlugin(c *pluginsdk.Context) (any, error) {
 	}
 	client = newAPIClient(pluginsdk.NewHTTPClient(), cfg.Level)
 
-	credential := in.Credential
-	if credential == "" {
-		if value, found, err := c.KVGet("music_u"); err == nil && found {
-			credential = string(value)
-		}
+	// 凭据优先级：登录持久化的 KV > 配置文件 music_u
+	credential := cfg.MusicU
+	if value, found, err := c.KVGet("music_u"); err == nil && found {
+		credential = string(value)
 	}
 	if credential != "" {
 		client.SetMUSICU(credential)

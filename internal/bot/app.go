@@ -29,17 +29,6 @@ import (
 // ErrReload /reload 触发的取消原因
 var ErrReload = errors.New("reload requested")
 
-var errLoginStopped = errors.New("startup login not completed")
-
-// LoginState 启动时的 Cookie 状态
-type LoginState int
-
-const (
-	LoginNone    LoginState = iota // 正常
-	LoginEmpty                     // 未配置
-	LoginInvalid                   // 已失效
-)
-
 // BuildInfo 编译信息，由 ldflags 注入
 type BuildInfo struct {
 	RuntimeVer  string
@@ -66,16 +55,16 @@ type App struct {
 	http          *http.Client
 	musicSem      *semaphore.Weighted
 	statusSem     *semaphore.Weighted
-	loginMu       sync.Mutex // 同时只允许一个扫码登录会话
+	loginMu       sync.Mutex // 同时只允许一个登录会话
 	loginCancelMu sync.Mutex // 保护 loginCancel 与 loginSurfaces
 	loginCancel   context.CancelCauseFunc
 	// loginSurfaces 记录当前会话的登录按钮消息，避免旧消息误取消新会话
 	loginSurfaces map[surfaceKey]bool
-	startupMu     sync.Mutex      // 保护 startupQR
-	startupQR     *startupSession // 非 nil 表示启动登录进行中
-	cacheChat     atomic.Int64    // 0 表示未设置缓存群
-	warnMu        sync.Mutex      // 保护 warnCancel
-	warnCancel    context.CancelFunc
+	tokenMu       sync.Mutex                    // 保护 tokenWaiters
+	tokenWaiters  map[surfaceKey]chan string    // token 登录：提示消息 -> 接收用户回复的通道
+	cacheChat     atomic.Int64                  // 0 表示未设置缓存群
+	warnMu        sync.Mutex                    // 保护 warnCancels
+	warnCancels   map[string]context.CancelFunc // provider -> 告警循环取消函数
 	reload        context.CancelCauseFunc
 	cooldownMu    sync.Mutex                // 保护 cooldowns
 	cooldowns     map[cooldownKey]time.Time // 冷却截止时间
@@ -107,22 +96,26 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 	}
 	defer plugins.Close(context.Background())
 
+	completeMissingConfig(cfg, cfgPath, plugins.ConfigSchemas(), log)
+
 	a := &App{
-		cfg:         cfg,
-		cfgPath:     cfgPath,
-		store:       st,
-		plugins:     plugins,
-		providers:   plugins.Providers(),
-		auth:        plugins.Auths(),
-		recognizers: plugins.Recognizers(),
-		dl:          fetch.New(cacheDir, cfg.Download.Timeout.D(), cfg.Download.Retries, cfg.Download.ReverseProxy, cfg.Download.AutoRetry),
-		log:         log,
-		build:       build,
-		cacheDir:    cacheDir,
-		http:        &http.Client{Timeout: 60 * time.Second},
-		musicSem:    semaphore.NewWeighted(int64(cfg.Download.Concurrency)),
-		statusSem:   semaphore.NewWeighted(1),
-		reload:      cancel,
+		cfg:          cfg,
+		cfgPath:      cfgPath,
+		store:        st,
+		plugins:      plugins,
+		providers:    plugins.Providers(),
+		auth:         plugins.Auths(),
+		recognizers:  plugins.Recognizers(),
+		dl:           fetch.New(cacheDir, cfg.Download.Timeout.D(), cfg.Download.Retries),
+		log:          log,
+		build:        build,
+		cacheDir:     cacheDir,
+		http:         &http.Client{Timeout: 60 * time.Second},
+		musicSem:     semaphore.NewWeighted(int64(cfg.Download.Concurrency)),
+		statusSem:    semaphore.NewWeighted(1),
+		warnCancels:  map[string]context.CancelFunc{},
+		tokenWaiters: map[surfaceKey]chan string{},
+		reload:       cancel,
 	}
 
 	opts := []tgb.Option{
@@ -165,26 +158,15 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 
 	a.registerHandlers(tg)
 	a.setupCommands(runCtx, tg)
-	loginState := checkLogin(runCtx, cfg, plugins, log)
-	if loginState != LoginNone {
-		a.auth.SetAvailable(plugins.DefaultName(), false)
-		go a.startupLogin(runCtx, cancel, loginState == LoginInvalid)
-	} else {
-		a.auth.SetAvailable(plugins.DefaultName(), true)
-		go a.watchCookie(runCtx)
-	}
+	a.checkCredentials(runCtx)
+	go a.watchCookie(runCtx)
 	tg.Start(runCtx)
 
 	// 等在途 handler 结束再由 defer 关闭 store 与插件，避免用到已关闭的资源
 	a.waitInflight(30 * time.Second)
 
-	cause := context.Cause(runCtx)
-	if errors.Is(cause, ErrReload) {
+	if errors.Is(context.Cause(runCtx), ErrReload) {
 		return true, nil
-	}
-	if errors.Is(cause, errLoginStopped) {
-		log.Println("启动登录未完成，bot 已停止")
-		return false, nil
 	}
 	return false, nil
 }
@@ -240,7 +222,6 @@ func (a *App) registerHandlers(tg *tgb.Bot) {
 	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "music ", tgb.MatchTypePrefix, a.handleCallbackMusic)
 	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "search ", tgb.MatchTypePrefix, a.handleCallbackSearch)
 	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "cancellogin", tgb.MatchTypeExact, a.handleCallbackCancelLogin, a.adminOnly)
-	tg.RegisterHandler(tgb.HandlerTypeCallbackQueryData, "startlogin", tgb.MatchTypeExact, a.handleCallbackStartLogin, a.adminOnly)
 	tg.RegisterHandlerMatchFunc(func(u *models.Update) bool { return u.InlineQuery != nil }, a.handleInline)
 	tg.RegisterHandlerMatchFunc(func(u *models.Update) bool { return u.GuestMessage != nil }, a.handleGuest)
 }
@@ -267,7 +248,7 @@ func matchCommand(name, botUsername string) tgb.MatchFunc {
 	}
 }
 
-// commandArguments 沿用旧版语义，只跳过命令后的一个字符
+// commandArguments 返回命令后的参数文本，只跳过命令与参数之间的一个分隔字符
 func commandArguments(m *models.Message) string {
 	e := m.Entities[0]
 	if len(m.Text) == e.Length {
@@ -276,30 +257,13 @@ func commandArguments(m *models.Message) string {
 	return m.Text[e.Length+1:]
 }
 
-// pluginConfig 把 [plugins] 与旧 [netease] 段转换为插件加载配置。
+// pluginConfig 把 [plugins] 与各 [plugins.<name>] 段转换为插件加载配置。
 func pluginConfig(cfg *config.Config) plugin.Config {
-	configs := make(map[string]json.RawMessage, len(cfg.Plugins.Config)+1)
+	configs := make(map[string]json.RawMessage, len(cfg.Plugins.Config))
 	for name, values := range cfg.Plugins.Config {
-		raw, err := json.Marshal(values)
-		if err == nil {
+		if raw, err := json.Marshal(values); err == nil {
 			configs[name] = raw
 		}
-	}
-	// 旧 [netease] 段作为默认值，[plugins.config.netease] 优先
-	legacy := map[string]any{"level": cfg.Netease.Level}
-	if cfg.Netease.Proxy != "" {
-		legacy["proxy"] = cfg.Netease.Proxy
-	}
-	for key, value := range cfg.Plugins.Config["netease"] {
-		legacy[key] = value
-	}
-	if raw, err := json.Marshal(legacy); err == nil {
-		configs["netease"] = raw
-	}
-
-	credentials := make(map[string]string)
-	if cfg.Netease.MUSICU != "" {
-		credentials["netease"] = cfg.Netease.MUSICU
 	}
 	return plugin.Config{
 		Dir:     cfg.Plugins.Dir,
@@ -312,33 +276,25 @@ func pluginConfig(cfg *config.Config) plugin.Config {
 			AllowPrivateNetworks: cfg.Plugins.AllowPrivateNetworks,
 			Instances:            cfg.Plugins.Instances,
 		},
-		Configs:     configs,
-		Credentials: credentials,
+		Configs: configs,
 	}
 }
 
-// checkLogin 用默认 provider 的 Authenticator 校验启动凭据；网络错误不视为失效。
-func checkLogin(ctx context.Context, cfg *config.Config, plugins *plugin.Manager, log *logrus.Logger) LoginState {
-	name := plugins.DefaultName()
-	authenticator, ok := plugins.Auths().Get(name)
-	if !ok {
-		return LoginNone
+// checkCredentials 启动时校验各 auth provider 的凭据；缺失或失效的 provider
+// 会被标记不可用并触发对管理员的重复告警。网络错误不视为失效。
+func (a *App) checkCredentials(ctx context.Context) {
+	for _, name := range a.auth.Names() {
+		authenticator, ok := a.auth.Get(name)
+		if !ok {
+			continue
+		}
+		status, err := authenticator.Status(ctx)
+		if err != nil {
+			a.log.Warnf("无法验证 %s 登录状态: %v", name, err)
+			continue
+		}
+		if !status.Authenticated {
+			a.pauseDownloads(ctx, name)
+		}
 	}
-	status, err := authenticator.Status(ctx)
-	if err != nil {
-		log.Warnf("无法验证 %s 登录状态: %v", name, err)
-		return LoginNone
-	}
-	if status.Authenticated {
-		return LoginNone
-	}
-	// 没有旧配置凭据时引导扫码；插件也可能把凭据存在自己的 secret KV 中
-	credential := ""
-	if name == "netease" {
-		credential = cfg.Netease.MUSICU
-	}
-	if credential == "" {
-		return LoginEmpty
-	}
-	return LoginInvalid
 }

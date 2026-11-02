@@ -1,23 +1,37 @@
 # 插件开发指南
 
-TuneweaveBot 把音乐平台相关能力全部放在 WASM 插件里。宿主（`internal/plugin`）
-负责加载 `.wasm`、实例池、超时/内存限制、HTTP 代理、KV 存储，并把插件能力
-包装成 `provider.Provider`、`provider.Recognizer`、`provider.Authenticator`。
+TuneweaveBot 的核心原则是**宿主对具体平台零知识**：所有与音乐平台相关的逻辑
+（链接解析、元数据、搜索、歌词、识曲、登录）都在 WASM 插件里，宿主
+（`internal/plugin`）只提供运行时与通用能力，不认识任何一个具体平台。
 
-插件是独立的 Go module，通过 `pluginsdk` 注册一个处理函数即可，无需了解宿主内部。
+宿主负责：加载 `.wasm`、维护实例池、施加超时/内存上限、转发 HTTP（带代理与
+SSRF 防护）、提供按插件隔离的 KV、把插件能力包装成
+`provider.Provider` / `provider.Recognizer` / `provider.Authenticator`。
 
-## 目录
+插件是独立的 Go module，只要通过 `pluginsdk` 注册一个 `handle` 函数并在 manifest
+里声明能力即可，无需了解宿主内部。
 
-```text
-pluginsdk/            插件 SDK（独立 module）
-plugins/netease/      官方网易云插件（provider + recognizer + auth）
-plugins/example/      最小 provider 示例
-dist/plugins/         构建产物（不进版本库）
-plugins/*.wasm        运行时加载目录（不进版本库）
+---
+
+## 1. 快速开始
+
+```sh
+cp -r plugins/example plugins/foo        # 复制最小示例
+```
+
+1. 改 `plugins/foo/go.mod` 的 module 路径。
+2. 在 manifest 里把 `name`/`display_name`/`code` 换成你的平台。
+3. 实现 `provider.match` / `provider.resolve`（最小可用的点歌只需这两个）。
+4. 构建并验证：
+
+```sh
+PLUGINS="foo" bash build-plugins.sh
+# config.toml 里 [plugins] enabled = ["foo"]，然后 /music foo <ID>
+# （match + resolve 即可点歌；实现 provider.search 后可用 /search foo <关键词>）
 ```
 
 `go.work` 已包含 `.`、`./pluginsdk`、`./plugins/netease`、`./plugins/example`。
-新插件请在自己的 `go.mod` 中加：
+新插件的 `go.mod` 里加：
 
 ```go
 require github.com/XiaoMengXinX/TuneweaveBot/pluginsdk v0.0.0
@@ -25,15 +39,27 @@ require github.com/XiaoMengXinX/TuneweaveBot/pluginsdk v0.0.0
 replace github.com/XiaoMengXinX/TuneweaveBot/pluginsdk => ../../pluginsdk
 ```
 
-## 构建
+并把目录加进 `go.work`（`go work use ./plugins/foo`）。
+
+---
+
+## 2. 目录与构建
+
+```text
+pluginsdk/            插件 SDK（独立 module，封装 ABI 协议）
+plugins/netease/      官方网易云插件（provider + recognizer + auth）
+plugins/example/      最小 provider 示例
+dist/plugins/         构建产物（不进版本库）
+plugins/*.wasm        运行时加载目录（不进版本库）
+```
 
 ```sh
-bash build-plugins.sh                      # 构建全部（当前为 netease）
-PLUGINS="example" bash build-plugins.sh    # 指定插件
+bash build-plugins.sh                      # 构建全部（默认 netease）
+PLUGINS="example foo" bash build-plugins.sh # 指定若干插件
 NO_COPY=1 bash build-plugins.sh            # 只输出到 dist/plugins，不复制到 plugins/
 ```
 
-实际命令：
+底层命令：
 
 ```sh
 CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm \
@@ -41,10 +67,27 @@ CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm \
   -o dist/plugins/<name>.wasm ./plugins/<name>
 ```
 
-文件名（去掉 `.wasm`）用于匹配 `[plugins] enabled`，插件内部通过 manifest 的
-`name` 注册为 provider；两者通常保持一致。默认 provider 缺失或目录为空时宿主拒绝启动。
+文件名（去掉 `.wasm`）用于匹配 `[plugins] enabled`。插件通过 manifest 的 `name`
+注册为 provider，两者通常保持一致。默认 provider 缺失或插件目录为空时宿主拒绝启动。
 
-## ABI v1
+---
+
+## 3. 运行模型
+
+每个插件被实例化成一个实例池（大小由 `resources.instances` 或 `[plugins] instances`
+决定）。宿主对实例做如下保证：
+
+- **并发**：同一池内的实例并行处理不同调用；池满时调用方排队。
+- **自愈**：实例 panic、trap、超时或 OOM 时，宿主丢弃该实例并重建，重建时会重新
+  执行 `init`（并重放最近一次登录凭据，见 §6）。
+- **隔离**：KV 与 `config.get` 都按插件名隔离，插件之间互不可见。
+
+因此插件代码应当是**无状态可重入**的：把会话状态放进 KV，而不是包级变量——包级变量
+在实例重建后会丢失。
+
+---
+
+## 4. ABI v1
 
 ### 导出（插件 → 宿主）
 
@@ -55,12 +98,12 @@ CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm \
 | `dealloc(ptr u32, size u32)` | 释放 `alloc`/`handle` 返回的内存 |
 | `handle(ptr u32, len u32) -> u64` | 处理一次调用，返回 `ptr \| len<<32` |
 
-> Go 的 reactor 模块不会执行 `main()`，插件必须在 `init()` 里注册：
->
-> ```go
-> func init() { pluginsdk.Main(handle) }
-> func main() {}
-> ```
+Go 的 reactor 模块不会执行 `main()`，插件必须在 `init()` 里注册入口：
+
+```go
+func init() { pluginsdk.Main(handle) }
+func main() {}
+```
 
 ### 导入（宿主 → 插件）
 
@@ -74,8 +117,8 @@ host.call(namePtr, nameLen, reqPtr, reqLen, respPtr, respCap) -> i64
 - `-2`：缓冲区不足；宿主在 `respPtr` 前 8 字节写入所需大小，插件扩容后重试
 - `-1`：其他错误
 
-host 函数**不会回调插件的 `alloc`**；响应缓冲区由插件预先分配并传入。
-`pluginsdk` 已处理这套协议，插件作者直接调用 `Context` 方法即可。
+host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配并传入。整套协议由
+`pluginsdk` 处理，插件作者只需调用 `Context` 方法。
 
 ### 信封
 
@@ -88,27 +131,37 @@ host 函数**不会回调插件的 `alloc`**；响应缓冲区由插件预先分
 ```
 
 错误码：`no_result`、`unsupported`、`auth_required`、`rate_limited`、`not_found`、
-`invalid_request`、`internal`。宿主据此映射用户文案；`message` 只写日志，不直接展示。
+`invalid_request`、`internal`。宿主据此映射用户文案，`message` 只写日志不直接展示。
+用 `pluginsdk.Fail(code, message)` 构造。
 
-## Actions
+---
 
-| Action | 方向 | Payload → Data |
+## 5. Actions
+
+| Action | Payload → Data | 能力 |
 | --- | --- | --- |
-| `manifest` | 宿主 → 插件 | `{}` → manifest |
-| `init` | 宿主 → 插件 | `{config, credential}` → `null` |
-| `shutdown` | 宿主 → 插件 | `{}` → `null` |
-| `provider.match` | 宿主 → 插件 | `{text}` → `{ref}` 或 `{ref:null}`；不得做重网络请求 |
-| `provider.canonicalize` | 宿主 → 插件 | `{ref}` → `{ref}`；节目等子资源归一为可缓存歌曲 |
-| `provider.resolve` | 宿主 → 插件 | `{ref}` → `{track, no_audio?}` |
-| `provider.search` | 宿主 → 插件 | `{keyword,limit,offset}` → `{items,total}` |
-| `provider.lyrics` | 宿主 → 插件 | `{ref}` → `{lrc,title,artists,album}` |
-| `recognizer.recognize` | 宿主 → 插件 | `{audio(b64),mime}` → `{ref}` |
-| `auth.status` | 宿主 → 插件 | `{}` → `{authenticated,account}` |
-| `auth.begin` | 宿主 → 插件 | `{}` → `{type,content,key,expires_in}` |
-| `auth.poll` | 宿主 → 插件 | `{key}` → `{state,credential,nickname,persist?}` |
-| `auth.apply` | 宿主 → 插件 | `{credential}` → `null` |
+| `manifest` | `{}` → manifest | 必需 |
+| `init` | `{config, credential}` → `null` | 必需 |
+| `shutdown` | `{}` → `null` | 必需 |
+| `provider.match` | `{text}` → `{ref}` 或 `{ref:null}` | provider |
+| `provider.canonicalize` | `{ref}` → `{ref}` | provider |
+| `provider.resolve` | `{ref}` → `{track}` | provider |
+| `provider.search` | `{keyword,limit,offset}` → `{items,total}` | provider |
+| `provider.lyrics` | `{ref}` → `{lrc,title,artists,album}` | provider |
+| `recognizer.recognize` | `{audio(b64),mime}` → `{ref}` | recognizer |
+| `auth.status` | `{}` → `{authenticated,account}` | auth |
+| `auth.begin` | `{mode}` → `{type,content,key,expires_in}` | auth |
+| `auth.poll` | `{key}` → `{state,credential,nickname,persist?}` | auth |
+| `auth.submit` | `{key,token}` → `{state,credential,nickname,persist?}` | auth（token 登录） |
+| `auth.apply` | `{credential}` → `null` | auth |
 
-`command.handle`、`callback.handle`、`inline.handle`、`message.match` 为 ABI 预留，v1 不调用。
+能力相互独立：只做点歌实现 `provider.*`；识曲另加 `recognizer.recognize`；登录另加
+`auth.*`。只有**默认 provider** 必须具备 `provider` 能力。
+
+- `provider.match`：**在每条消息上调用**，只做本地解析（识别链接/ID），不得做重网络
+  请求（短链跳转除外）。无法识别时返回 `{ref:null}`。
+- `provider.canonicalize`：把节目、电台等子资源归一成可缓存的歌曲 `ref`。
+- `provider.resolve`：返回元数据与可下载音频；没有音频时在 track 里用 `no_audio` 标记。
 
 ### Manifest
 
@@ -125,75 +178,125 @@ host 函数**不会回调插件的 `alloc`**；响应缓冲区由插件预先分
   "commands": [
     {"name": "example", "description": "示例 provider 点歌"},
     {"name": "program", "description": "按节目 ID 点歌", "type": "template",
-     "template": "https://music.163.com/program?id={args}"}
+     "template": "https://example.com/program?id={args}"}
   ],
   "resources": {"memory_mb": 128, "instances": 1},
-  "http_allowed_hosts": ["example.com"]
+  "http_allowed_hosts": ["example.com"],
+  "config_schema": [
+    {"key": "token", "type": "string", "default": "", "secret": true,
+     "comment": "登录凭据，可用 /login 获取"}
+  ]
 }
 ```
 
 - `name`：`^[a-z0-9][a-z0-9_-]{0,31}$`，用于 `[plugins] enabled/default` 与 `/search <name>`
 - `code`：`^[a-z0-9]{1,8}$`，用于 Telegram 回调/start 参数（`code_base64url(id)`）
-- `capabilities`：`provider` / `recognizer` / `auth`
-- `commands`：`type` 为 `provider`（默认，参数交给该插件）或 `template`（`{args}` 替换后生成链接再解析）
+- `commands.type`：`provider`（默认，参数交给该插件）或 `template`（`{args}` 替换后生成链接再解析）
 - `http_allowed_hosts`：为空表示不限制；支持 `*.example.com` 通配
-- `resources.instances`：覆盖全局实例池大小；`memory_mb` 目前作为文档提示
+- `resources.instances`：覆盖全局实例池大小；`memory_mb` 目前仅作文档提示
+
+### config_schema
+
+声明该插件 `[plugins.<name>]` 段支持的配置项，宿主用它：
+
+- `./TuneweaveBot gen-config` 生成带注释的配置模板；
+- 启动时检测配置缺失的字段并补全（终端会询问，非终端自动补全）。
+
+字段：`key`（`^[a-z0-9][a-z0-9_]*$`）、`type`（`string`/`int`/`bool`）、
+`default`（可选，类型须与 `type` 一致）、`comment`（可选注释）、`secret`
+（可选，true 时模板只写键名+空值，不写默认值）。宿主不校验配置项的业务语义，
+那是插件在 `init` 里的事（例如音质枚举、降级逻辑）。
 
 ### Track / Ref
 
-插件返回的 `ref`、`track`、`track summary` 字段与宿主 `internal/provider/types.go` 一致。
-`ref.page_url` / `ref.share_text` 用于在没有额外 RPC 的情况下提供展示链接；
-`track` 中的同名字段优先。`track.tag_format` 可选 `netease163key`、`id3` 或空。
+插件返回的 `ref`、`track`、`track summary` 字段与宿主 `internal/provider/types.go`
+一致。`ref.page_url` / `ref.share_text` 在没有额外 RPC 时提供展示链接，`track` 中的
+同名字段优先。`track.tag_format` 可选 `netease163key`、`id3` 或空。
 
-## 宿主能力
+`command.handle`、`callback.handle`、`inline.handle`、`message.match` 为 ABI 预留，v1 不调用。
+
+---
+
+## 6. 登录（auth）
+
+宿主把登录抽象成多态流程，由 `auth.begin` 的返回类型决定交互方式：
+
+| `type` | 交互 | 需要实现 |
+| --- | --- | --- |
+| `qr` | 宿主把 `content` 渲染成二维码，轮询 `auth.poll` | `begin`+`poll` |
+| `link` | 宿主把 `content` 作为链接发出，轮询 `auth.poll` | `begin`+`poll` |
+| `token` | 宿主提示用户回复消息发送 token，收到后调 `auth.submit` | `begin`+`submit` |
+
+`/login <provider>` 用默认交互；`/login <provider> token` 请求 token 交互
+（`auth.begin` 会收到 `{mode:"token"}`）。一个插件可同时支持多种方式：按 `mode`
+在 `auth.begin` 里返回不同的 `type`。
+
+- `auth.status` → `{authenticated, account}`：宿主启动时与每 10 分钟各查一次；返回
+  未登录会暂停该 provider 的下载并每 10 分钟提醒管理员，直到恢复。网络错误不算失效。
+- `auth.poll`（qr/link）→ `{state}`：`waiting`/`scanned`/`success`/`expired`。
+- `auth.submit`（token）→ 同 `auth.poll` 的结果结构；token 无效返回 `expired`。
+- 成功时返回 `credential`（宿主广播给池内所有实例）、可选 `nickname`，以及可选
+  `persist:{section,key}` 让宿主把凭据写回 `[plugins.<section>] <key>`。
+- `auth.apply`：宿主把 `credential` 广播到每个实例时调用，你在这里更新内存状态并
+  `KVSet` 持久化，使实例重建后仍能自动登录。
+
+凭据读取优先级建议：登录持久化的 KV > 配置文件里的字段。参见
+`plugins/netease/auth.go`。
+
+---
+
+## 7. 宿主能力
 
 | host name | 说明 |
 | --- | --- |
 | `log` | `{level,message}`，宿主加 `[plugin:<name>]` 前缀 |
 | `http.request` | `{method,url,headers,body_b64,timeout_ms}` → `{status,headers,body_b64}` |
-| `kv.get/set/delete/list` | 按插件隔离的 KV（SQLite），用于保存 cookie/token 等凭据 |
-| `config.get` | 只返回该插件的 `[plugins.config.<name>]` |
-| `time.now` / `random` | 便利接口 |
+| `kv.get/set/delete/list` | 按插件隔离的 KV（SQLite），保存 cookie/token 等 |
+| `config.get` | 只返回该插件的 `[plugins.<name>]` |
+| `time.now` / `random` | 便利接口（wasip1 下系统时间/熵不可直接用） |
 
 `pluginsdk.NewHTTPClient()` 返回一个把请求转发到 `http.request` 的 `*http.Client`，
-因此依赖 `net/http` 的第三方库（如 `Music163Api-Go`）可以几乎原样运行在插件里。
+依赖 `net/http` 的第三方库（如 `Music163Api-Go`）几乎可以原样跑在插件里。
 
 HTTP 约定：
 
 - 只允许 http/https；默认拒绝环回、私网、链路本地地址（宿主可配置）
 - `http_allowed_hosts` 非空时只允许列出的 host
-- 不自动跟随重定向（`CheckRedirect = ErrUseLastResponse`），由插件自己的 client 处理
-- 4xx/5xx 作为正常响应返回，传输错误才返回 host error
-- 单次响应体有大小上限（`[plugins] http_max_bytes`）
+- 不自动跟随重定向（`CheckRedirect = ErrUseLastResponse`），由插件自己处理
+- 4xx/5xx 作为正常响应返回，只有传输错误才是 host error
+- 单次响应体有大小上限（`[plugins] http_max_bytes`，默认 8MB）
+- 代理（`[plugins] proxy`）由宿主统一应用，插件无需关心
 
-## 开发建议
+---
 
-1. 从 `plugins/example/` 复制一份，改 `go.mod` 的 module 路径。
-2. `handle` 里按 `c.Action()` 分发；`init` 中用 `c.Config(&cfg)` 读取配置。
-3. 需要登录的插件用 `c.KVGet/KVSet` 保存凭据，并在 `auth.poll` 返回
-   `persist:{section,key}` 让宿主写回配置文件（网易云插件写回 `[netease] music_u`）。
-4. 纯逻辑（链接解析、字段映射）写成不依赖 `Context` 的函数，在宿主上直接 `go test`；
-   `//go:wasmexport` / `//go:wasmimport` 只在 `//go:build wasip1` 文件中，非 wasm 构建
-   会使用 SDK 的 stub，因此插件 module 可以正常跑原生单测。
-5. 不要在 `provider.match` 里做重网络请求（短链跳转除外），它会在每条消息上调用。
-6. 插件 panic 会被 SDK 转为 `internal` 错误；超时、trap 或 OOM 时宿主会丢弃并重建实例。
+## 8. 开发建议
 
-## 扩展其它平台
+1. **纯逻辑单测**：链接解析、字段映射写成不依赖 `Context` 的函数，在宿主上直接
+   `go test`。`//go:wasmexport` / `//go:wasmimport` 只在 `//go:build wasip1` 文件里，
+   非 wasm 构建用 SDK 的 stub，因此插件 module 能跑原生单测。
+2. **无状态**：会话态放 KV，不要放包级变量（实例重建会丢）。
+3. **match 要轻**：`provider.match` 每条消息都调用，别做重网络请求。
+4. **错误要分类**：用 `pluginsdk.Fail` 返回恰当的错误码，宿主据此给用户文案。
+5. **panic 安全**：插件 panic 被 SDK 转成 `internal`；超时/trap/OOM 时实例被重建。
 
-Spotify / QQ 音乐等 provider 不需要改动宿主：
+---
 
-1. 复制 `plugins/example/`，实现 `provider.match`（识别链接/ID）、`provider.resolve`
-   （元数据 + 可下载地址）、`provider.search`、`provider.lyrics`；
-2. 用 `[plugins] enabled` 启用，并用 `/search <name> <关键词>` 验证；
-3. 需要登录时实现 `auth.*`，凭据用 `c.KVGet/KVSet` 保存；
-4. 若平台返回加密/签名的音频地址，插件负责在 `resolve` 时换算出宿主可直接下载的 URL；
-   宿主会在下载前再次校验 scheme 与私网地址。
+## 9. 数据面较大的平台（下载即解密）
 
-宿主不内置任何平台实现，默认 provider 由 `[plugins] default` 决定。
+有些平台（如 Spotify）的音频是加密流，需要先取密钥再解密、转码。加密音频整首可达
+几十 MB，**绝不能流经 wasm**——会同时撞 `http_max_bytes` 与实例内存上限。
 
-## 安全边界
+正确切分：插件只做**纯 HTTP 编排**（解析、元数据、取 CDN URL 与解密密钥这类“指针级”
+小数据），把下载+解密+转码这类大数据面交给宿主执行，插件拿回本地文件路径填进
+`track`。宿主的解密能力是**平台中立的原语**（输入密钥端点/认证头/密文 URL，输出
+解密文件），平台专属的“打哪个端点、带什么头”仍由插件作为参数传入——这样宿主依然不
+认识任何具体平台。
 
-插件是半可信代码：运行在 wazero 沙箱中，只能通过宿主导出的能力访问外部世界。
-宿主会限制 HTTP 目标、响应大小、内存与调用时长。插件返回的
-`audio_url` / `cover_url` 在下载前也会做 scheme 与私网检查（可通过
-`[plugins] allow_private_networks` 放开，仅供本地测试）。
+---
+
+## 10. 安全边界
+
+插件是半可信代码，运行在 wazero 沙箱中，只能通过宿主导出的能力访问外部世界。宿主
+限制 HTTP 目标、响应大小、内存与调用时长。插件返回的 `audio_url` / `cover_url` 在
+下载前也会做 scheme 与私网检查（可用 `[plugins] allow_private_networks` 放开，仅供
+本地测试）。宿主不内置任何平台实现，默认 provider 由 `[plugins] default` 决定。

@@ -104,7 +104,7 @@ func TestSetCacheChat(t *testing.T) {
 }
 
 func TestRmCacheFromReply(t *testing.T) {
-	audioKeyboard := musicKeyboard(store.SongInfo{MusicID: 123, SongName: "<Song>", SongArtists: "Artist"}, nil)
+	audioKeyboard := musicKeyboard(store.SongInfo{Provider: "netease", TrackID: "123", SongName: "<Song>", SongArtists: "Artist", ShareText: "https://music.163.com/song?id=123"}, nil)
 	for _, tt := range []struct {
 		name      string
 		text      string
@@ -141,7 +141,7 @@ func TestRmCacheFromReply(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = st.Close() })
 			a.store = st
-			if err := st.Save(&store.SongInfo{MusicID: 123, SongName: "<Song>", FileID: "audio"}); err != nil {
+			if err := st.Save(&store.SongInfo{Provider: "netease", TrackID: "123", SongName: "<Song>", FileID: "audio"}); err != nil {
 				t.Fatal(err)
 			}
 			a.handleRmCache(t.Context(), tg, &models.Update{Message: &models.Message{
@@ -155,7 +155,7 @@ func TestRmCacheFromReply(t *testing.T) {
 			if strings.Join(replies, "\n") != tt.wantReply {
 				t.Errorf("replies = %q, want %q", replies, tt.wantReply)
 			}
-			if _, ok := st.GetByMusicID(123); ok == tt.wantGone {
+			if _, ok := st.GetByRef("netease", "123"); ok == tt.wantGone {
 				t.Errorf("cached = %v, want removed = %v", ok, tt.wantGone)
 			}
 		})

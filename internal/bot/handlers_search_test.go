@@ -109,7 +109,7 @@ func newSearchTest(t *testing.T, total int) (*App, *tgb.Bot, *searchTelegram) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	a.store = st
-	if err := st.Save(&store.SongInfo{MusicID: 1, SongName: "Song 1", FileID: "cached-audio"}); err != nil {
+	if err := st.Save(&store.SongInfo{Provider: fakeProviderName, TrackID: "1", SongName: "Song 1", FileID: "cached-audio"}); err != nil {
 		t.Fatal(err)
 	}
 	p := newFakeProvider()

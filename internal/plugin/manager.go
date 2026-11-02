@@ -18,12 +18,11 @@ import (
 )
 
 type Config struct {
-	Dir         string
-	Enabled     []string
-	Default     string
-	Runtime     RuntimeConfig
-	Configs     map[string]json.RawMessage
-	Credentials map[string]string
+	Dir     string
+	Enabled []string
+	Default string
+	Runtime RuntimeConfig
+	Configs map[string]json.RawMessage
 }
 
 // Manager 管理已加载的插件并提供 provider/auth/recognizer 适配器。
@@ -69,7 +68,7 @@ func (m *Manager) load(ctx context.Context, cfg Config) error {
 		if len(pluginCfg) == 0 {
 			pluginCfg = json.RawMessage(`{}`)
 		}
-		p, err := m.runtime.loadPlugin(ctx, path, pluginCfg, cfg.Credentials[name])
+		p, err := m.runtime.loadPlugin(ctx, path, pluginCfg)
 		if err != nil {
 			return fmt.Errorf("加载插件 %s 失败: %w", name, err)
 		}
@@ -173,6 +172,30 @@ type PluginInfo struct {
 	DisplayName  string
 	Version      string
 	Capabilities []string
+}
+
+// PluginConfigSchema 是一个插件声明的配置项集合，供生成/补全配置使用。
+type PluginConfigSchema struct {
+	Name        string
+	DisplayName string
+	Fields      []ConfigField
+}
+
+// ConfigSchemas 按加载顺序返回各插件声明的配置项。
+func (m *Manager) ConfigSchemas() []PluginConfigSchema {
+	out := make([]PluginConfigSchema, 0, len(m.order))
+	for _, name := range m.order {
+		p := m.plugins[name]
+		if len(p.manifest.ConfigSchema) == 0 {
+			continue
+		}
+		out = append(out, PluginConfigSchema{
+			Name:        p.manifest.Name,
+			DisplayName: p.manifest.DisplayName,
+			Fields:      p.manifest.ConfigSchema,
+		})
+	}
+	return out
 }
 
 func (m *Manager) Info() []PluginInfo {

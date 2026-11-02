@@ -7,7 +7,7 @@
 //	enabled = ["example"]
 //	default = "example"
 //
-//	[plugins.config.example]
+//	[plugins.example]
 //	audio_url_template = "https://example.com/audio/{id}.mp3"
 package main
 
@@ -45,6 +45,9 @@ func manifest() map[string]any {
 			{"name": "example", "description": "示例 provider 点歌"},
 		},
 		"http_allowed_hosts": []string{"example.com"},
+		"config_schema": []map[string]any{
+			{"key": "audio_url_template", "type": "string", "default": "https://example.com/{id}.mp3", "comment": "音频地址模板，{id} 替换为曲目 ID"},
+		},
 	}
 }
 

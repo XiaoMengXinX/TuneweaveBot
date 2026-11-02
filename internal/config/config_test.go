@@ -27,7 +27,7 @@ const validTOML = `
 token = "123456:ABC"
 admin = [115414, 1919810]
 
-[netease]
+[plugins.netease]
 music_u = "COOKIE"
 
 [download]
@@ -40,7 +40,7 @@ func TestLoadDefaults(t *testing.T) {
 [bot]
 token = "123456:ABC"
 
-[netease]
+[plugins.netease]
 music_u = "COOKIE"
 `)
 	cfg, err := Load(path)
@@ -62,14 +62,8 @@ music_u = "COOKIE"
 	if cfg.Download.Concurrency != 4 {
 		t.Errorf("concurrency 默认值错误: %d", cfg.Download.Concurrency)
 	}
-	if !cfg.Download.AutoRetry {
-		t.Error("auto_retry 默认应为 true")
-	}
 	if cfg.Log.Level != "info" || cfg.Log.Path != "./log" {
 		t.Errorf("log 默认值错误: %+v", cfg.Log)
-	}
-	if cfg.Netease.Level != "hires" {
-		t.Errorf("netease.level 默认值错误: %s", cfg.Netease.Level)
 	}
 }
 
@@ -176,36 +170,51 @@ func TestLoadUnknownFieldRejected(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "strict mode") {
 		t.Fatalf("拼错的配置项应被严格模式拒绝: %v", err)
 	}
+	// 即使存在被剥离的插件段，其它段的拼写错误仍应被拒绝
+	_, err = Load(writeTemp(t, `[bot]
+token = "x"
+badkey = 1
+
+[plugins.netease]
+level = "hires"
+`))
+	if err == nil || !strings.Contains(err.Error(), "strict mode") {
+		t.Fatalf("剥离插件段后拼错项仍应被严格模式拒绝: %v", err)
+	}
 }
 
 func TestNeteaseLevel(t *testing.T) {
 	cfg, err := Load(writeTemp(t, `[bot]
 token = "123:ABC"
 
-[netease]
+[plugins.netease]
 music_u = "COOKIE"
 level = "lossless"
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Netease.Level != "lossless" {
-		t.Errorf("level = %s, want lossless", cfg.Netease.Level)
+	if cfg.Plugins.Config["netease"]["level"] != "lossless" {
+		t.Errorf("level = %v, want lossless", cfg.Plugins.Config["netease"]["level"])
 	}
-	if _, err := Load(writeTemp(t, `[bot]
+	cfg, err = Load(writeTemp(t, `[bot]
 token = "123:ABC"
 
-[netease]
+[plugins.netease]
 music_u = "COOKIE"
 level = "sq"
-`)); err == nil {
-		t.Error("非法音质等级应被拒绝")
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Plugins.Config["netease"]["level"] != "sq" {
+		t.Errorf("level = %v, want sq", cfg.Plugins.Config["netease"]["level"])
 	}
 }
 
 func TestNeteaseProxy(t *testing.T) {
-	t.Setenv("TUNEWEAVE_NETEASE_PROXY", "")
-	if err := os.Unsetenv("TUNEWEAVE_NETEASE_PROXY"); err != nil {
+	t.Setenv("TUNEWEAVE_PLUGINS_PROXY", "")
+	if err := os.Unsetenv("TUNEWEAVE_PLUGINS_PROXY"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tt := range []struct {
@@ -223,9 +232,9 @@ func TestNeteaseProxy(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.env != nil {
-				t.Setenv("TUNEWEAVE_NETEASE_PROXY", *tt.env)
+				t.Setenv("TUNEWEAVE_PLUGINS_PROXY", *tt.env)
 			}
-			cfg, err := Load(writeTemp(t, "[bot]\ntoken = '1:test'\n[netease]\n"+tt.setting))
+			cfg, err := Load(writeTemp(t, "[bot]\ntoken = '1:test'\n[plugins]\n"+tt.setting))
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected invalid proxy error")
@@ -238,7 +247,7 @@ func TestNeteaseProxy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.Netease.Proxy != tt.want {
+			if cfg.Plugins.Proxy != tt.want {
 				t.Error("proxy configuration mismatch")
 			}
 		})
@@ -254,7 +263,7 @@ func TestNeteaseProxyValidation(t *testing.T) {
 		t.Run("valid/"+proxy, func(t *testing.T) {
 			cfg := Default()
 			cfg.Bot.Token = "1:test"
-			cfg.Netease.Proxy = proxy
+			cfg.Plugins.Proxy = proxy
 			if err := cfg.Validate(); err != nil {
 				t.Fatal(err)
 			}
@@ -272,27 +281,32 @@ func TestNeteaseProxyValidation(t *testing.T) {
 		t.Run("invalid/"+proxy, func(t *testing.T) {
 			cfg := Default()
 			cfg.Bot.Token = "1:test"
-			cfg.Netease.Proxy = proxy
+			cfg.Plugins.Proxy = proxy
 			err := cfg.Validate()
 			if err == nil {
 				t.Fatal("expected invalid proxy error")
 			}
-			if !strings.Contains(err.Error(), "[netease] proxy") || strings.Contains(err.Error(), proxy) || strings.Contains(err.Error(), "password") {
+			if !strings.Contains(err.Error(), "[plugins] proxy") || strings.Contains(err.Error(), proxy) || strings.Contains(err.Error(), "password") {
 				t.Fatalf("unexpected proxy error: %v", err)
 			}
 		})
 	}
 }
 
+// neteasePlugins 返回只配置了 proxy 的 PluginsConfig，供 HTTP 客户端测试使用。
+func neteasePlugins(proxy string) PluginsConfig {
+	return PluginsConfig{Proxy: proxy}
+}
+
 func TestNeteaseHTTPClient(t *testing.T) {
-	client, err := (NeteaseConfig{}).HTTPClient()
+	client, err := neteasePlugins("").HTTPClient()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if client.Transport != nil || client.Timeout != 0 {
 		t.Fatal("empty proxy should preserve default transport and timeout")
 	}
-	if client, err := (NeteaseConfig{Proxy: "http://user:password@localhost:bad"}).HTTPClient(); err == nil || client != nil || strings.Contains(err.Error(), "password") {
+	if client, err := neteasePlugins("http://user:password@localhost:bad").HTTPClient(); err == nil || client != nil || strings.Contains(err.Error(), "password") {
 		t.Fatal("parse errors should be returned without credentials")
 	}
 
@@ -310,11 +324,11 @@ func TestNeteaseHTTPClient(t *testing.T) {
 	defaultProxy := fmt.Sprintf("%p", defaultTransport.Proxy)
 	cfg := Default()
 	cfg.Bot.Token = "1:test"
-	cfg.Netease.Proxy = strings.Replace(proxy.URL, "://", "://user:password@", 1)
+	cfg.Plugins.Proxy = strings.Replace(proxy.URL, "://", "://user:password@", 1)
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	client, err = cfg.Netease.HTTPClient()
+	client, err = cfg.Plugins.HTTPClient()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,11 +389,11 @@ func TestNeteaseHTTPClientSOCKS5(t *testing.T) {
 			}()
 			cfg := Default()
 			cfg.Bot.Token = "1:test"
-			cfg.Netease.Proxy = scheme + "://" + listener.Addr().String()
+			cfg.Plugins.Proxy = scheme + "://" + listener.Addr().String()
 			if err := cfg.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			client, err := cfg.Netease.HTTPClient()
+			client, err := cfg.Plugins.HTTPClient()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -407,7 +421,7 @@ func TestNeteaseHTTPClientSOCKS5(t *testing.T) {
 }
 
 func TestLoadMissingRequired(t *testing.T) {
-	if _, err := Load(writeTemp(t, `[netease]
+	if _, err := Load(writeTemp(t, `[plugins.netease]
 music_u = "x"
 `)); err == nil {
 		t.Error("缺少 token 应报错")
@@ -438,111 +452,12 @@ func TestEnvOverride(t *testing.T) {
 	}
 }
 
-func TestMigrateINI(t *testing.T) {
-	ini := map[string]string{
-		"BOT_TOKEN":       "111:AAA",
-		"MUSIC_U":         "COOKIE",
-		"BotAPI":          "https://custom.api",
-		"BotAdmin":        "115414, 1919810",
-		"BotDebug":        "true",
-		"Database":        "data/cache.db",
-		"LogLevel":        "debug",
-		"DownloadTimeout": "90",
-		"MaxRetryTimes":   "5",
-		"ReverseProxy":    "1.2.3.4:443",
-		"AutoRetry":       "false",
-		"AutoUpdate":      "true",
-		"CheckMD5":        "true",
-		"SrcPath":         "./src",
-		"BotEntry":        "bot.Start",
-	}
-	cfg, notes, err := MigrateINI(ini)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Bot.Token != "111:AAA" || cfg.Netease.MUSICU != "COOKIE" {
-		t.Errorf("token/music_u 迁移错误: %+v", cfg)
-	}
-	if cfg.Bot.APIURL != "https://custom.api" {
-		t.Errorf("api_url 迁移错误: %s", cfg.Bot.APIURL)
-	}
-	// 管理员 ID 两侧的空格不影响迁移
-	if len(cfg.Bot.Admin) != 2 || cfg.Bot.Admin[0] != 115414 || cfg.Bot.Admin[1] != 1919810 {
-		t.Errorf("admin 迁移错误: %v", cfg.Bot.Admin)
-	}
-	if !cfg.Bot.Debug {
-		t.Error("debug 迁移错误")
-	}
-	if cfg.Database.Path != "data/cache.db" {
-		t.Errorf("database.path 迁移错误: %s", cfg.Database.Path)
-	}
-	if cfg.Log.Level != "debug" {
-		t.Errorf("log.level 迁移错误: %s", cfg.Log.Level)
-	}
-	if cfg.Download.Timeout.D() != 90*time.Second {
-		t.Errorf("timeout 迁移错误（应为 90s）: %v", cfg.Download.Timeout)
-	}
-	if cfg.Download.Retries != 5 {
-		t.Errorf("retries 迁移错误: %d", cfg.Download.Retries)
-	}
-	if cfg.Download.ReverseProxy != "1.2.3.4:443" {
-		t.Errorf("reverse_proxy 迁移错误: %s", cfg.Download.ReverseProxy)
-	}
-	if cfg.Download.AutoRetry {
-		t.Error("auto_retry=false 迁移错误")
-	}
-	if len(notes) != 4 {
-		t.Errorf("死配置应有 4 条提示, got %v", notes)
-	}
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("迁移结果未通过校验: %v", err)
-	}
-}
-
-func TestMigrateINIFile(t *testing.T) {
-	dir := t.TempDir()
-	iniPath := filepath.Join(dir, "config.ini")
-	outPath := filepath.Join(dir, "config.toml")
-	ini := "BOT_TOKEN = 111:AAA\nMUSIC_U = COOKIE\nBotAdmin = 115414,1919810\nDownloadTimeout = 30\n"
-	if err := os.WriteFile(iniPath, []byte(ini), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := MigrateINIFile(iniPath, outPath); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(outPath)
-	if err != nil {
-		t.Fatalf("迁移产物无法被 Load 解析: %v", err)
-	}
-	if cfg.Bot.Token != "111:AAA" || len(cfg.Bot.Admin) != 2 || cfg.Download.Timeout.D() != 30*time.Second {
-		t.Errorf("迁移产物内容错误: %+v", cfg)
-	}
-}
-
-func TestParseINI(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.ini")
-	content := "# comment\n\nBOT_TOKEN=abc=def\n  MUSIC_U = cookie  \nEMPTY=\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ini, err := ParseINI(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ini["BOT_TOKEN"] != "abc=def" {
-		t.Errorf("值中含 = 应取第一个 = 之后全部: %q", ini["BOT_TOKEN"])
-	}
-	if ini["MUSIC_U"] != "cookie" {
-		t.Errorf("应 trim 首尾空白: %q", ini["MUSIC_U"])
-	}
-	if _, ok := ini["EMPTY"]; ok {
-		t.Error("空值行应跳过")
-	}
-}
-
 func TestPluginsConfig(t *testing.T) {
-	cfg, err := Load(writeTemp(t, validTOML+`
+	cfg, err := Load(writeTemp(t, `
+[bot]
+token = "123456:ABC"
+admin = [115414, 1919810]
+
 [plugins]
 dir = "./myplugins"
 enabled = ["netease", "qq"]
@@ -553,7 +468,8 @@ memory_mb = 256
 http_max_bytes = 1048576
 allow_private_networks = true
 
-[plugins.config.netease]
+[plugins.netease]
+music_u = "COOKIE"
 level = "lossless"
 `))
 	if err != nil {
@@ -572,31 +488,40 @@ level = "lossless"
 	if got := p.Config["netease"]["level"]; got != "lossless" {
 		t.Errorf("netease level = %v", got)
 	}
-	// [plugins.config.netease] 覆盖旧 [netease] 段，供宿主 HTTP 代理/校验使用
-	if cfg.Netease.Level != "lossless" {
-		t.Errorf("legacy netease level = %q, want lossless", cfg.Netease.Level)
+	if got := p.Config["netease"]["music_u"]; got != "COOKIE" {
+		t.Errorf("netease music_u = %v, want COOKIE", got)
 	}
 }
 
-func TestPluginsConfigOverridesLegacyNetease(t *testing.T) {
+func TestPluginsSectionReservedForHost(t *testing.T) {
+	// [plugins] 宿主字段拼写错误仍应被严格模式拒绝
+	if _, err := Load(writeTemp(t, validTOML+"\n[plugins]\nbadkey = 1\n")); err == nil {
+		t.Error("[plugins] 中拼错的宿主字段应被拒绝")
+	}
+}
+
+func TestPluginsCustomSection(t *testing.T) {
+	// 任意插件段原样透传，不受 netease 专属逻辑影响
 	cfg, err := Load(writeTemp(t, `
 [bot]
 token = "123456:ABC"
 
-[netease]
+[plugins.netease]
 music_u = "COOKIE"
-proxy = "http://127.0.0.1:1080"
-level = "standard"
+level = "hires"
 
-[plugins.config.netease]
-proxy = "http://127.0.0.1:8080"
-level = "sky"
+[plugins.example]
+greeting = "hi"
+count = 7
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Netease.Proxy != "http://127.0.0.1:8080" || cfg.Netease.Level != "sky" {
-		t.Errorf("merged netease = %+v", cfg.Netease)
+	if got := cfg.Plugins.Config["example"]["greeting"]; got != "hi" {
+		t.Errorf("example greeting = %v", got)
+	}
+	if got, ok := cfg.Plugins.Config["example"]["count"].(int64); !ok || got != 7 {
+		t.Errorf("example count = %v (%T)", cfg.Plugins.Config["example"]["count"], cfg.Plugins.Config["example"]["count"])
 	}
 }
 

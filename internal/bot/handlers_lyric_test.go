@@ -55,7 +55,7 @@ func TestLyricFromReplyButton(t *testing.T) {
 		}, nil
 	}
 	setTestProvider(t, a, p)
-	keyboard := musicKeyboard(store.SongInfo{MusicID: 123, SongName: "Song", SongArtists: "Artist"}, nil)
+	keyboard := musicKeyboard(store.SongInfo{Provider: "netease", TrackID: "123", SongName: "Song", SongArtists: "Artist", ShareText: "https://music.163.com/song?id=123"}, nil)
 	a.handleLyric(t.Context(), tg, &models.Update{Message: &models.Message{
 		ID:       2,
 		Text:     "/lyric",

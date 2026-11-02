@@ -12,18 +12,27 @@ const ABI = 1
 
 // Manifest 是插件通过 manifest action 声明的能力。
 type Manifest struct {
-	Name                string    `json:"name"`
-	DisplayName         string    `json:"display_name"`
-	Version             string    `json:"version"`
-	ABI                 int       `json:"abi"`
-	Code                string    `json:"code"`
-	Capabilities        []string  `json:"capabilities"`
-	AuthRequired        bool      `json:"auth_required"`
-	DefaultTagFormat    string    `json:"default_tag_format"`
-	LegacyConfigSection string    `json:"legacy_config_section"`
-	Commands            []Command `json:"commands"`
-	Resources           Resources `json:"resources"`
-	HTTPAllowedHosts    []string  `json:"http_allowed_hosts"`
+	Name             string        `json:"name"`
+	DisplayName      string        `json:"display_name"`
+	Version          string        `json:"version"`
+	ABI              int           `json:"abi"`
+	Code             string        `json:"code"`
+	Capabilities     []string      `json:"capabilities"`
+	AuthRequired     bool          `json:"auth_required"`
+	DefaultTagFormat string        `json:"default_tag_format"`
+	Commands         []Command     `json:"commands"`
+	Resources        Resources     `json:"resources"`
+	HTTPAllowedHosts []string      `json:"http_allowed_hosts"`
+	ConfigSchema     []ConfigField `json:"config_schema,omitempty"`
+}
+
+// ConfigField 声明插件 [plugins.<name>] 段的一个配置项，供宿主生成/补全配置。
+type ConfigField struct {
+	Key     string `json:"key"`
+	Type    string `json:"type"` // string | int | bool
+	Default any    `json:"default,omitempty"`
+	Comment string `json:"comment,omitempty"`
+	Secret  bool   `json:"secret,omitempty"`
 }
 
 // Command 是插件声明的 Telegram 命令。
@@ -45,9 +54,10 @@ type Resources struct {
 const maxPluginCommands = 100
 
 var (
-	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
-	codeRe    = regexp.MustCompile(`^[a-z0-9]{1,8}$`)
-	commandRe = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+	nameRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+	codeRe     = regexp.MustCompile(`^[a-z0-9]{1,8}$`)
+	commandRe  = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+	cfgFieldRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_]*$`)
 )
 
 func (m *Manifest) validate() error {
@@ -89,6 +99,45 @@ func (m *Manifest) validate() error {
 		default:
 			return fmt.Errorf("插件 %s 的命令 %q 类型 %q 不受支持", m.Name, cmd.Name, cmd.Type)
 		}
+	}
+	seenKeys := make(map[string]bool, len(m.ConfigSchema))
+	for _, f := range m.ConfigSchema {
+		if !cfgFieldRe.MatchString(f.Key) {
+			return fmt.Errorf("插件 %s 的配置项键名 %q 不合法", m.Name, f.Key)
+		}
+		if seenKeys[f.Key] {
+			return fmt.Errorf("插件 %s 的配置项 %q 重复", m.Name, f.Key)
+		}
+		seenKeys[f.Key] = true
+		if err := validateFieldType(f); err != nil {
+			return fmt.Errorf("插件 %s 的配置项 %q: %w", m.Name, f.Key, err)
+		}
+	}
+	return nil
+}
+
+// validateFieldType 校验 type 合法，且 default（若有）与 type 自洽。
+// JSON 把 any 数字解成 float64，int 字段因此接受整值 float64。
+func validateFieldType(f ConfigField) error {
+	switch f.Type {
+	case "string":
+		if _, ok := f.Default.(string); f.Default != nil && !ok {
+			return fmt.Errorf("default 应为字符串")
+		}
+	case "bool":
+		if _, ok := f.Default.(bool); f.Default != nil && !ok {
+			return fmt.Errorf("default 应为布尔值")
+		}
+	case "int":
+		if f.Default == nil {
+			return nil
+		}
+		n, ok := f.Default.(float64)
+		if !ok || n != float64(int64(n)) {
+			return fmt.Errorf("default 应为整数")
+		}
+	default:
+		return fmt.Errorf("不支持的类型 %q", f.Type)
 	}
 	return nil
 }

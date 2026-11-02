@@ -143,11 +143,15 @@ func (a fakeAuthenticator) Status(context.Context) (provider.AuthStatus, error) 
 	return provider.AuthStatus{Authenticated: true}, nil
 }
 
-func (a fakeAuthenticator) Begin(context.Context) (*provider.AuthChallenge, error) {
+func (a fakeAuthenticator) Begin(context.Context, string) (*provider.AuthChallenge, error) {
 	return &provider.AuthChallenge{Type: "qr", Key: "key"}, nil
 }
 
 func (a fakeAuthenticator) Poll(context.Context, string) (*provider.AuthState, error) {
+	return &provider.AuthState{State: provider.AuthSuccess}, nil
+}
+
+func (a fakeAuthenticator) Submit(context.Context, string, string) (*provider.AuthState, error) {
 	return &provider.AuthState{State: provider.AuthSuccess}, nil
 }
 

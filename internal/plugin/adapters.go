@@ -134,9 +134,9 @@ func (a *AuthAdapter) Status(ctx context.Context) (provider.AuthStatus, error) {
 	return out, err
 }
 
-func (a *AuthAdapter) Begin(ctx context.Context) (*provider.AuthChallenge, error) {
+func (a *AuthAdapter) Begin(ctx context.Context, mode string) (*provider.AuthChallenge, error) {
 	var out provider.AuthChallenge
-	if err := a.plugin.call(ctx, "auth.begin", struct{}{}, &out); err != nil {
+	if err := a.plugin.call(ctx, "auth.begin", map[string]string{"mode": mode}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -145,6 +145,14 @@ func (a *AuthAdapter) Begin(ctx context.Context) (*provider.AuthChallenge, error
 func (a *AuthAdapter) Poll(ctx context.Context, key string) (*provider.AuthState, error) {
 	var out provider.AuthState
 	if err := a.plugin.call(ctx, "auth.poll", map[string]string{"key": key}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (a *AuthAdapter) Submit(ctx context.Context, key, token string) (*provider.AuthState, error) {
+	var out provider.AuthState
+	if err := a.plugin.call(ctx, "auth.submit", map[string]string{"key": key, "token": token}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

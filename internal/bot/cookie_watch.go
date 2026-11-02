@@ -35,7 +35,9 @@ func (a *App) watchCookie(ctx context.Context) {
 					// 网络错误不视为凭据失效
 					continue
 				}
-				if !status.Authenticated {
+				if status.Authenticated {
+					a.resumeDownloads(ctx, name)
+				} else {
 					a.pauseDownloads(ctx, name)
 				}
 			}
@@ -52,7 +54,10 @@ func (a *App) pauseDownloads(ctx context.Context, providerName string) {
 
 	warnCtx, cancel := context.WithCancel(context.Background())
 	a.warnMu.Lock()
-	a.warnCancel = cancel
+	if old := a.warnCancels[providerName]; old != nil {
+		old()
+	}
+	a.warnCancels[providerName] = cancel
 	a.warnMu.Unlock()
 	go func() {
 		ticker := time.NewTicker(cookieWarnInterval)
@@ -72,11 +77,10 @@ func (a *App) pauseDownloads(ctx context.Context, providerName string) {
 	}()
 }
 
-// 仅在监控告警后通知管理员恢复，启动登录不通知
 func (a *App) resumeDownloads(ctx context.Context, providerName string) {
 	a.warnMu.Lock()
-	warnCancel := a.warnCancel
-	a.warnCancel = nil
+	warnCancel := a.warnCancels[providerName]
+	delete(a.warnCancels, providerName)
 	a.warnMu.Unlock()
 	if warnCancel != nil {
 		warnCancel()
@@ -95,18 +99,13 @@ func (a *App) finishLogin(auth provider.Authenticator, state *provider.AuthState
 		return "\n应用凭据失败: " + err.Error(), err
 	}
 	if state.Persist != nil {
-		if state.Persist.Section == "netease" && state.Persist.Key == "music_u" {
-			if err := config.UpdateMUSICU(a.cfgPath, state.Credential); err != nil {
-				a.log.Errorln(err)
-				note = "\n配置文件写入失败: " + err.Error() + "\n本次登录已生效，重启后将失效"
-			}
-		} else {
-			// 插件要求持久化到未知位置时明确提示，而不是静默忽略
-			note = "\n凭据未写入配置文件，重启后将失效"
+		if err := config.UpdatePluginValue(a.cfgPath, state.Persist.Section, state.Persist.Key, state.Credential); err != nil {
+			a.log.Errorln(err)
+			note = "\n配置文件写入失败: " + err.Error() + "\n本次登录已生效，重启后将失效"
 		}
 	}
 	a.resumeDownloads(context.Background(), auth.Name())
-	a.log.Printf("%s 扫码登录成功: %s", auth.Name(), state.Nickname)
+	a.log.Printf("%s 登录成功: %s", auth.Name(), state.Nickname)
 	return note, nil
 }
 

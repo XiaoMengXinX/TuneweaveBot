@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"strconv"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -20,10 +19,9 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// SongInfo 歌曲信息，字段与 v2 的 song_infos 表一致
+// SongInfo 歌曲缓存，以 (Provider, TrackID) 为缓存键
 type SongInfo struct {
 	gorm.Model
-	MusicID      int // 旧字段，数字 ID 的 provider 仍写入，便于兼容旧数据
 	Provider     string
 	TrackID      string
 	ProviderName string
@@ -98,31 +96,18 @@ func (s *Store) GetByRef(provider, trackID string) (SongInfo, bool) {
 	return songInfo, true
 }
 
-// GetByMusicID 按歌曲 ID 查询缓存，兼容旧数据与旧测试
-func (s *Store) GetByMusicID(musicID int) (SongInfo, bool) {
-	var songInfo SongInfo
-	err := s.db.Where("music_id = ?", musicID).First(&songInfo).Error
-	if err != nil {
-		return songInfo, false
-	}
-	return songInfo, true
-}
-
 // 按 (provider, track_id) 更新缓存，同时清除软删除标记
 func (s *Store) Save(songInfo *SongInfo) error {
 	if songInfo.Provider == "" {
-		songInfo.Provider = "netease"
+		return fmt.Errorf("保存缓存失败: provider 不能为空")
 	}
 	if songInfo.TrackID == "" {
-		if songInfo.MusicID == 0 {
-			return fmt.Errorf("保存缓存失败: track_id 不能为空")
-		}
-		songInfo.TrackID = strconv.Itoa(songInfo.MusicID)
+		return fmt.Errorf("保存缓存失败: track_id 不能为空")
 	}
 	return s.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "provider"}, {Name: "track_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"updated_at", "deleted_at", "music_id", "provider_name", "page_url", "share_text",
+			"updated_at", "deleted_at", "provider_name", "page_url", "share_text",
 			"song_name", "song_artists", "song_album",
 			"file_ext", "music_size", "pic_size", "emb_pic_size", "bit_rate", "duration",
 			"file_id", "thumb_file_id", "from_user_id", "from_user_name", "from_chat_id", "from_chat_name",
@@ -136,17 +121,6 @@ func (s *Store) DeleteByRef(provider, trackID string) (name string, ok bool, err
 		return "", false, nil
 	}
 	if err := s.db.Where("provider = ? AND track_id = ?", provider, trackID).Delete(&SongInfo{}).Error; err != nil {
-		return "", false, err
-	}
-	return songInfo.SongName, true, nil
-}
-
-func (s *Store) DeleteByMusicID(musicID int) (name string, ok bool, err error) {
-	songInfo, found := s.GetByMusicID(musicID)
-	if !found {
-		return "", false, nil
-	}
-	if err := s.db.Where("music_id = ?", musicID).Delete(&SongInfo{}).Error; err != nil {
 		return "", false, err
 	}
 	return songInfo.SongName, true, nil

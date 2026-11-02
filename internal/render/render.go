@@ -54,51 +54,30 @@ const (
 	InlineInputKeyword  = "请输入关键词"
 	BotName             = "TuneweaveBot"
 
-	LoginBusy        = "已有扫码登录会话进行中"
-	LoginKeyFailed   = "获取二维码失败，请稍后重试"
-	LoginExpired     = "二维码已过期，请重新发送 /login"
-	LoginCheckFailed = "查询扫码状态失败，请稍后重试"
+	LoginBusy        = "已有登录会话进行中"
+	LoginKeyFailed   = "发起登录失败，请稍后重试"
+	LoginExpired     = "登录已过期，请重新发送 /login"
+	LoginCheckFailed = "查询登录状态失败，请稍后重试"
 	LoginCancelled   = "已取消登录"
 	LoginFailed      = "登录失败，请稍后重试"
 	CancelLogin      = "取消登录"
 
-	LoginUnsupported      = "当前 Provider 不支持登录"
-	LoginStartButton      = "扫码登录"
-	LoginTimeoutStopped   = "登录超时，bot 已停止"
-	LoginCancelledStopped = "已取消登录，bot 已停止"
-	LoginStartupDone      = "Cookie 已生效"
-	LoginSessionOver      = "登录会话已结束，可发送 /login"
-	LoginNoSession        = "当前没有进行中的登录会话，可发送 /login"
-	LoginQRSent           = "已发送登录二维码"
+	LoginUnsupported = "当前 Provider 不支持登录"
+	LoginSessionOver = "登录会话已结束，可发送 /login"
+	LoginNoSession   = "当前没有进行中的登录会话，可发送 /login"
 
 	InputChatID          = "缓存群 ID 须为数字，也可以在目标群内直接发送 /setcachechat"
 	CacheChatTest        = "已设为缓存群，Guest Mode 点歌时会先把未缓存的歌曲上传到这里"
 	CacheChatUnreachable = "无法向该聊天发送消息，请确认 bot 已加入并可以发言"
 	CacheChatDisabled    = "已关闭缓存群"
 
-	CookieExpired          = "Cookie 过期，请联系 bot 管理员"
-	CookieExpiredAdminWarn = "Cookie 已失效，新歌下载已暂停，请发送 /login 重新登录"
-	CookieResumedAdmin     = "Cookie 已生效，新歌下载已恢复"
+	CookieExpired          = "登录已失效，请联系 bot 管理员"
+	CookieExpiredAdminWarn = "登录已失效，新歌下载已暂停，请发送 /login 重新登录"
+	CookieResumedAdmin     = "登录已生效，新歌下载已恢复"
 )
 
-func LoginStartupPrompt(expired bool, remainSec int) string {
-	head := "Cookie 未配置，需登录"
-	if expired {
-		head = "Cookie 已失效，需重新登录"
-	}
-	return fmt.Sprintf("%s\n点击下方按钮扫码登录，或扫描终端内二维码\n请在 %d 秒内操作", head, remainSec)
-}
-
-func LoginStartupTerminal(expired bool, remainSec int) string {
-	head := "Cookie 未配置，需登录"
-	if expired {
-		head = "Cookie 已失效，需重新登录"
-	}
-	return fmt.Sprintf("%s\n请使用网易云音乐 App 扫描下方二维码\n请在 %d 秒内操作", head, remainSec)
-}
-
 func LoginQRCaption(remainSec int) string {
-	return fmt.Sprintf("请使用网易云音乐 App 扫码\n剩余有效期 %d 秒", remainSec)
+	return fmt.Sprintf("请扫描二维码登录\n剩余有效期 %d 秒", remainSec)
 }
 
 func LoginScanned(nickname string) string {
@@ -110,9 +89,9 @@ func LoginScanned(nickname string) string {
 
 func LoginOK(nickname string) string {
 	if nickname != "" {
-		return "扫码登录成功: " + Escape(nickname)
+		return "登录成功: " + Escape(nickname)
 	}
-	return "扫码登录成功"
+	return "登录成功"
 }
 
 func Escape(s string) string { return html.EscapeString(s) }

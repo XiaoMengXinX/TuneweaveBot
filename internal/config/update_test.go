@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestUpdateMUSICU(t *testing.T) {
+func TestUpdatePluginValue(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	original := `# 我的配置注释
@@ -15,9 +15,10 @@ func TestUpdateMUSICU(t *testing.T) {
 token = "111:AAA" # token 注释
 admin = [1, 2]
 
-[netease]
+[plugins.netease]
 # music_u 注释
 music_u = 'old-cookie' # 行尾注释
+level = "hires"
 
 [download]
 timeout = "60s"
@@ -26,7 +27,7 @@ timeout = "60s"
 		t.Fatal(err)
 	}
 
-	if err := UpdateMUSICU(path, "new-cookie<>&"); err != nil {
+	if err := UpdatePluginValue(path, "netease", "music_u", "new-cookie<>&"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,9 +40,10 @@ timeout = "60s"
 token = "111:AAA" # token 注释
 admin = [1, 2]
 
-[netease]
+[plugins.netease]
 # music_u 注释
 music_u = "new-cookie<>&" # 行尾注释
+level = "hires"
 
 [download]
 timeout = "60s"
@@ -54,34 +56,62 @@ timeout = "60s"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Netease.MUSICU != "new-cookie<>&" {
-		t.Errorf("music_u = %q", cfg.Netease.MUSICU)
+	if got := cfg.Plugins.Config["netease"]["music_u"]; got != "new-cookie<>&" {
+		t.Errorf("music_u = %q", got)
 	}
 	if cfg.Bot.Token != "111:AAA" || cfg.Download.Timeout.D() != 60*time.Second {
 		t.Errorf("其它配置被误改: %+v", cfg)
 	}
 
-	// 同时覆盖单引号和双引号赋值
-	if err := UpdateMUSICU(path, "third"); err != nil {
+	if err := UpdatePluginValue(path, "netease", "music_u", "third"); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Netease.MUSICU != "third" {
-		t.Errorf("二次更新失败: %q", cfg.Netease.MUSICU)
+	if got := cfg.Plugins.Config["netease"]["music_u"]; got != "third" {
+		t.Errorf("二次更新失败: %q", got)
 	}
 }
 
-func TestUpdateMUSICUMissingKey(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
+func TestUpdatePluginValueInsert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("[bot]\ntoken = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpdateMUSICU(path, "y"); err == nil {
-		t.Error("缺少 music_u 应报错")
+	// 段与键都不存在时应新建而非报错
+	if err := UpdatePluginValue(path, "spotify", "sp_dc", "COOKIE"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Plugins.Config["spotify"]["sp_dc"]; got != "COOKIE" {
+		t.Errorf("sp_dc = %q", got)
+	}
+}
+
+func TestUpdatePluginValueExistingSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	src := "[bot]\ntoken = \"x\"\n\n[plugins.spotify]\nquality = \"MP4_256\"\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 段存在但键缺失时在段内补齐
+	if err := UpdatePluginValue(path, "spotify", "sp_dc", "COOKIE"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Plugins.Config["spotify"]["sp_dc"]; got != "COOKIE" {
+		t.Errorf("sp_dc = %q", got)
+	}
+	if got := cfg.Plugins.Config["spotify"]["quality"]; got != "MP4_256" {
+		t.Errorf("原有键被破坏: quality = %q", got)
 	}
 }
 

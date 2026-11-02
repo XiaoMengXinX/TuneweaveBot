@@ -13,8 +13,11 @@ func (f fakeAuth) Name() string { return f.name }
 func (f fakeAuth) Status(context.Context) (provider.AuthStatus, error) {
 	return provider.AuthStatus{}, nil
 }
-func (f fakeAuth) Begin(context.Context) (*provider.AuthChallenge, error) { return nil, nil }
+func (f fakeAuth) Begin(context.Context, string) (*provider.AuthChallenge, error) { return nil, nil }
 func (f fakeAuth) Poll(context.Context, string) (*provider.AuthState, error) {
+	return nil, nil
+}
+func (f fakeAuth) Submit(context.Context, string, string) (*provider.AuthState, error) {
 	return nil, nil
 }
 func (f fakeAuth) Apply(context.Context, string) error { return nil }

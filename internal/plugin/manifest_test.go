@@ -36,6 +36,17 @@ func TestManifestValidate(t *testing.T) {
 		{"template without args", func(m *Manifest) {
 			m.Commands = []Command{{Name: "ok", Description: "示例描述", Type: "template", Template: "https://example.com/"}}
 		}},
+		{"bad config key", func(m *Manifest) { m.ConfigSchema = []ConfigField{{Key: "Bad", Type: "string"}} }},
+		{"bad config type", func(m *Manifest) { m.ConfigSchema = []ConfigField{{Key: "k", Type: "float"}} }},
+		{"duplicate config key", func(m *Manifest) {
+			m.ConfigSchema = []ConfigField{{Key: "k", Type: "string"}, {Key: "k", Type: "int"}}
+		}},
+		{"int default not integer", func(m *Manifest) {
+			m.ConfigSchema = []ConfigField{{Key: "k", Type: "int", Default: 1.5}}
+		}},
+		{"string default wrong type", func(m *Manifest) {
+			m.ConfigSchema = []ConfigField{{Key: "k", Type: "string", Default: true}}
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := validManifest()
@@ -53,6 +64,16 @@ func TestManifestValidate(t *testing.T) {
 	}
 	if got := m.Commands[0].CommandType(); got != "template" {
 		t.Errorf("CommandType = %q", got)
+	}
+
+	m = validManifest()
+	m.ConfigSchema = []ConfigField{
+		{Key: "token", Type: "string", Default: "", Secret: true},
+		{Key: "retries", Type: "int", Default: float64(3)},
+		{Key: "enabled", Type: "bool", Default: true},
+	}
+	if err := m.validate(); err != nil {
+		t.Errorf("valid config schema: %v", err)
 	}
 
 	m = validManifest()

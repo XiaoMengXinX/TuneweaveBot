@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -132,14 +131,14 @@ func TestProcessMusicCachedInfo(t *testing.T) {
 	defer st.Close()
 	a.store = st
 	info := store.SongInfo{
-		MusicID: 123, SongName: "雨き声残響", SongArtists: "ゆめこ",
+		Provider: "netease", TrackID: "123", SongName: "雨き声残響", SongArtists: "ゆめこ",
 		SongAlbum: "最新热歌慢摇92", FileID: "cached-audio",
 	}
 	if err := st.Save(&info); err != nil {
 		t.Fatal(err)
 	}
 	called := false
-	err = a.processMusic(context.Background(), provider.Ref{Provider: "netease", ID: strconv.Itoa(info.MusicID)}, &models.Message{ID: 1, Chat: models.Chat{ID: 42}}, func(got store.SongInfo) {
+	err = a.processMusic(context.Background(), provider.Ref{Provider: info.Provider, ID: info.TrackID}, &models.Message{ID: 1, Chat: models.Chat{ID: 42}}, func(got store.SongInfo) {
 		called = true
 		if got.SongName != info.SongName || got.SongArtists != info.SongArtists || got.SongAlbum != info.SongAlbum {
 			t.Errorf("unexpected song info: %+v", got)
@@ -195,7 +194,7 @@ func TestProcessMusicInfoWithoutURL(t *testing.T) {
 				ID: 1, Chat: models.Chat{ID: 42}, From: &models.User{ID: 42},
 			}, func(info store.SongInfo) {
 				calls++
-				if info.MusicID != 123 || info.SongName != "雨き声残響" || info.SongArtists != "ゆめこ" || info.SongAlbum != "最新热歌慢摇92" {
+				if info.TrackID != "123" || info.SongName != "雨き声残響" || info.SongArtists != "ゆめこ" || info.SongAlbum != "最新热歌慢摇92" {
 					t.Errorf("unexpected song info: %+v", info)
 				}
 			})

@@ -22,7 +22,7 @@ TuneweaveBot 是一个 Telegram 点歌机器人。宿主只负责 Telegram 交�
 - 分享链接嗅探（网易云含 `163cn.tv` / `163cn.link` 短链）、inline 模式、歌曲搜索翻页
 - 下载并发送音频，自动写入 ID3 / 网易云 163key 标签，支持无损 FLAC（需对应平台 VIP）
 - 语音识别搜歌（`/recognize`，纯 Go 解析音频，无需 FFmpeg）
-- 扫码登录（管理员 `/login`，免手动抓 cookie）
+- 登录（管理员 `/login`，支持扫码与回复提交 token/cookie，免手动抓 cookie）
 - Guest Mode：无需把 bot 拉进群，回复分享链接或语音即可点歌/识曲
 - 优雅退出、`/reload` 进程内热重载、下载失败经反代重试
 
@@ -62,23 +62,18 @@ token = "YOUR_BOT_TOKEN"   # 必填
 admin = [123456]           # 管理员 ID
 upload_timeout = "120s"    # 上传及其他 Telegram API 请求的总超时
 
-[netease]
-music_u = "YOUR_MUSIC_U"   # 网易云 cookie 中的 MUSIC_U（可留空，启动后扫码登录；下载无损需 VIP）
-level = "hires"            # 优先音质，账号无权限时自动降级
-proxy = ""                 # 网易云请求代理，如 http://127.0.0.1:8080 或 socks5://127.0.0.1:1080
-
 [download]
 timeout = "120s"
 retries = 3
 concurrency = 4
-reverse_proxy = ""
-auto_retry = true
 ```
 
 完整配置项见 `config_example.toml`。所有配置都可用 `TUNEWEAVE_` 前缀的环境变量覆盖
 （如 `TUNEWEAVE_BOT_TOKEN`、`TUNEWEAVE_DOWNLOAD_TIMEOUT`），便于容器部署。
 
 **插件配置**
+
+每个插件对应一个独立的 `[plugins.<插件名>]` 段，整段原样传给该插件：
 
 ```toml
 [plugins]
@@ -90,17 +85,21 @@ call_timeout = "30s"       # 单次插件调用超时
 memory_mb = 128            # 单实例内存上限
 http_max_bytes = 8388608   # 插件单次 HTTP 响应上限
 allow_private_networks = false  # 插件 HTTP 与下载是否允许私网地址（默认拒绝，防 SSRF）
+proxy = ""                 # 所有插件 HTTP 及宿主下载共用的代理，如 http://127.0.0.1:8080 或 socks5://127.0.0.1:1080
 
-[plugins.config.netease]   # 传给插件的任意键值；与 [netease] 合并，本段优先
-level = "hires"
+[plugins.netease]          # 原样传给 netease 插件，宿主不解释其内容
+music_u = "YOUR_MUSIC_U"   # 网易云 cookie 中的 MUSIC_U（可留空，用 /login 登录；下载无损需 VIP）
+level = "hires"            # 优先音质，账号无权限时自动降级
 ```
 
-`[plugins.config.<插件名>]` 的字符串值可用环境变量
+`[plugins.<插件名>]` 的字符串值可用环境变量
 `TUNEWEAVE_PLUGINS_CONFIG_<插件名>_<键>` 覆盖，例如
-`TUNEWEAVE_PLUGINS_CONFIG_NETEASE_LEVEL=lossless`。
+`TUNEWEAVE_PLUGINS_CONFIG_NETEASE_LEVEL=lossless`。`./TuneweaveBot gen-config`
+可按已装插件生成带注释的配置模板；启动时若配置缺少插件声明的字段会自动补全
+（终端会先询问）。
 
-插件把扫码登录的凭据存入数据库（`cache.db` 的 KV 表），并通过 `persist` 写回配置文件
-对应字段（网易云写回 `[netease] music_u`），重启后自动复用。
+插件把登录凭据存入数据库（`cache.db` 的 KV 表），并通过 `persist` 写回配置文件
+对应字段，重启后自动复用。
 
 指令菜单每次启动自动注册（无需在 BotFather 手动设置）：普通用户看到 `/music` `/search`
 等公共指令，管理员额外看到 `/login` `/rmcache` `/reload` `/setcachechat`。inline 模式需在
@@ -111,18 +110,14 @@ BotFather 手动开启并设置占位文案。
 ```
 $ ./TuneweaveBot -c config.toml
 2026/01/01 12:00:00 [INFO] TuneweaveBot v1.0.0 启动中 (main.go:53)
-MUSIC_U 已失效，请重新扫码登录
-
-请使用网易云音乐 App 扫描二维码登录（Ctrl-C 退出）
-...（终端二维码）...
-扫码登录成功，已写入 config.toml
 2026/01/01 12:00:20 [INFO] TuneweaveBot 验证成功 (app.go:100)
 ```
 
-默认 provider 的凭据缺失或失效时，bot 仍会启动，终端打印登录二维码，同时管理员收到带
-「扫码登录」按钮的提示，点击扫码即可；成功后自动写回配置并恢复下载，超时未登录则自动停止。
-运行中凭据失效时新歌下载暂停（已缓存歌曲仍可发送），管理员重新登录后自动恢复。
-管理员发送 `/reload` 可在进程内重载配置，无需重启。
+bot 启动不依赖任何平台的登录状态。某个 provider 凭据缺失或失效时，该 provider 的
+新歌下载会暂停（已缓存歌曲仍可发送），管理员每 10 分钟收到一次提醒，直到恢复。
+管理员用 `/login [provider]` 扫码登录，或 `/login <provider> token` 回复消息提交
+token/cookie；成功后自动写回配置并恢复下载。管理员发送 `/reload` 可在进程内重载
+配置，无需重启。
 
 **Docker 部署**
 
@@ -141,7 +136,7 @@ docker compose up -d
 插件是独立的 Go module，编译为 `.wasm` 后放入 `plugins/` 即可。
 
 - SDK：`pluginsdk/`（`pluginsdk.Main`、HTTP/KV/Config 等宿主能力）
-- 官方插件：`plugins/netease/`（网易云音乐，含识曲与扫码登录）
+- 官方插件：`plugins/netease/`（网易云音乐，含识曲与登录）
 - 最小示例：`plugins/example/`（固定数据的 provider，演示命令声明与 resolve/search/lyrics）
 
 ABI、action 列表、内存约定和开发步骤见 [`plugins/README.md`](plugins/README.md)。
@@ -158,7 +153,7 @@ ABI、action 列表、内存约定和开发步骤见 [`plugins/README.md`](plugi
 - `/status` —— 缓存与插件状态
 - `/about` —— 关于本 bot
 - `/start <ID>` —— 深链点歌（inline 未缓存时引导）
-- 管理员：`/rmcache <ID/链接>` 清除缓存、`/reload` 重载配置、`/login` 扫码登录、
+- 管理员：`/rmcache <ID/链接>` 清除缓存、`/reload` 重载配置、`/login [provider] [token]` 登录、
   `/setcachechat [群 ID]` 设置 Guest Mode 缓存群
 - 直接发送分享链接即可嗅探点歌；inline 输入 `help` 查看用法
 
@@ -171,15 +166,6 @@ Guest Mode 无法直接上传文件。设置缓存群后，未缓存的歌曲会
 管理员在目标群内发送 `/setcachechat` 即设为当前群，或 `/setcachechat <群 ID>` 指定其它可发言的聊天，
 `/setcachechat 0` 关闭；设置写入配置的 `[bot] cache_chat`。自建 Bot API 需支持 Bot API 10.0 的
 `guest_message` 与 `answerGuestQuery`。
-
-## 📦 从 Music163bot v2 迁移
-
-TuneweaveBot 的网易云插件沿用了 Music163bot 的命令与交互，可直接迁移：
-
-1. **配置**：把 v2 的 `config.ini` 放在程序同目录，首次启动自动转换成 `config.toml` 并打印提示；
-   也可手动执行 `./TuneweaveBot migrate-config -c config.ini -o config.toml`。
-   v2 未实现的配置项（`AutoUpdate`、`CheckMD5`、`SrcPath`、`BotEntry`）在转换时丢弃并提示。
-2. **数据库**：v2 的 `cache.db` 首次启动自动迁移，重复缓存行去重并建唯一索引，已缓存歌曲全部保留。
 
 ## 📄 许可
 

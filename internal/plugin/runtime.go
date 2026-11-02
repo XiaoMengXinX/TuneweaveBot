@@ -213,7 +213,7 @@ func (p *Plugin) setCred(credential string) {
 	p.credMu.Unlock()
 }
 
-func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.RawMessage, credential string) (*Plugin, error) {
+func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.RawMessage) (*Plugin, error) {
 	wasm, err := os.ReadFile(wasmPath)
 	if err != nil {
 		return nil, err
@@ -222,7 +222,7 @@ func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.R
 	if err != nil {
 		return nil, fmt.Errorf("编译插件 %s 失败: %w", wasmPath, err)
 	}
-	p := &Plugin{runtime: r, compiled: compiled, config: config, credential: credential}
+	p := &Plugin{runtime: r, compiled: compiled, config: config}
 
 	// 探测阶段只读 manifest：禁止 HTTP（空白名单）并加超时，防止插件卡住启动
 	probeCtx, cancelProbe := context.WithTimeout(ctx, r.cfg.CallTimeout)
@@ -250,7 +250,7 @@ func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.R
 	probe.state.plugin = manifest.Name
 	probe.state.allowedHosts = p.allowedHosts
 
-	if err := r.initInstance(ctx, probe, credential); err != nil {
+	if err := r.initInstance(ctx, probe, ""); err != nil {
 		_ = probe.module.Close(ctx)
 		r.states.Delete(probe.name)
 		_ = compiled.Close(ctx)
@@ -266,7 +266,7 @@ func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.R
 			p.Close(ctx)
 			return nil, err
 		}
-		if err := r.initInstance(ctx, inst, credential); err != nil {
+		if err := r.initInstance(ctx, inst, ""); err != nil {
 			_ = inst.module.Close(ctx)
 			r.states.Delete(inst.name)
 			p.Close(ctx)

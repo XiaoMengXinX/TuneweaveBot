@@ -15,7 +15,14 @@ func authStatus() (any, error) {
 	return AuthStatus{Authenticated: valid}, nil
 }
 
-func authBegin() (any, error) {
+func authBegin(mode string) (any, error) {
+	if mode == "token" {
+		return AuthChallenge{
+			Type:    "token",
+			Content: "请回复本条消息，发送你的 MUSIC_U cookie",
+			Key:     "music_u",
+		}, nil
+	}
 	key, err := client.CreateQRLoginKey()
 	if err != nil {
 		return nil, err
@@ -25,6 +32,24 @@ func authBegin() (any, error) {
 		Content:   qrLoginContent(key),
 		Key:       key,
 		ExpiresIn: 180,
+	}, nil
+}
+
+// authSubmit 校验用户提交的 MUSIC_U，成功则返回凭据供宿主持久化。
+func authSubmit(token string) (any, error) {
+	client.SetMUSICU(token)
+	valid, err := client.LoginStatusValid()
+	if err != nil {
+		return nil, err
+	}
+	if !valid {
+		client.SetMUSICU("")
+		return AuthState{State: "expired"}, nil
+	}
+	return AuthState{
+		State:      "success",
+		Credential: token,
+		Persist:    &Persist{Section: "netease", Key: "music_u"},
 	}, nil
 }
 

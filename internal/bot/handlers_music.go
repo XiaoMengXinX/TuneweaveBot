@@ -112,6 +112,9 @@ func (a *App) handleDefault(ctx context.Context, tg *tgb.Bot, update *models.Upd
 	if m == nil {
 		return
 	}
+	if a.captureToken(ctx, m) {
+		return
+	}
 	ref, ok := a.messageRef(ctx, m)
 	if !ok {
 		return
@@ -181,7 +184,7 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, message *model
 	}
 
 	cached := func() (store.SongInfo, bool) {
-		// FileID 为空的缓存行（旧库或手动插入）不算命中，否则会尝试 os.Open("")
+		// FileID 为空的缓存行（手动插入或仅存了元数据）不算命中，否则会尝试 os.Open("")
 		info, ok := a.store.GetByRef(canonical.Provider, canonical.ID)
 		return info, ok && info.FileID != ""
 	}
@@ -320,7 +323,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 			return
 		}
 		statusText := render.Downloading
-		if p.Attempt > 1 && p.ViaProxy {
+		if p.Attempt > 1 {
 			statusText = render.Redownloading
 		}
 		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024,
@@ -457,7 +460,6 @@ func (a *App) fillSongInfo(songInfo *store.SongInfo, track *provider.Track, ref 
 	if providerName == "" {
 		providerName = ref.Provider
 	}
-	songInfo.MusicID = numericID(id)
 	songInfo.Provider = providerName
 	songInfo.TrackID = id
 	songInfo.ProviderName = track.ProviderName
@@ -480,11 +482,6 @@ func (a *App) fillSongInfo(songInfo *store.SongInfo, track *provider.Track, ref 
 	}
 	songInfo.MusicSize = int(track.Size)
 	songInfo.BitRate = track.BitRate
-}
-
-func numericID(id string) int {
-	n, _ := strconv.Atoi(id)
-	return n
 }
 
 // songFileName 歌曲与歌词文件共用命名
