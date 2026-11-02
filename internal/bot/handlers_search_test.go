@@ -281,7 +281,7 @@ func TestSearchCallbackChecks(t *testing.T) {
 	}
 }
 
-func TestParseSearchArgsProvider(t *testing.T) {
+func TestParseProviderArgs(t *testing.T) {
 	a := newTestApp(nil)
 	for _, tt := range []struct {
 		args     string
@@ -293,9 +293,9 @@ func TestParseSearchArgsProvider(t *testing.T) {
 		{args: "晴天", keyword: "晴天"},
 		{args: "unknown 晴天", keyword: "unknown 晴天"},
 	} {
-		provider, keyword := a.parseSearchArgs(tt.args)
+		provider, keyword := a.parseProviderArgs(tt.args)
 		if provider != tt.provider || keyword != tt.keyword {
-			t.Errorf("parseSearchArgs(%q) = %q, %q; want %q, %q", tt.args, provider, keyword, tt.provider, tt.keyword)
+			t.Errorf("parseProviderArgs(%q) = %q, %q; want %q, %q", tt.args, provider, keyword, tt.provider, tt.keyword)
 		}
 	}
 	// provider:id 形式由 Registry.Match 解析（/rmcache 在 parseRefArg 失败后回退到它）

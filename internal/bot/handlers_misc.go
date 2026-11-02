@@ -10,15 +10,103 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/config"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/plugin"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/provider"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/render"
 )
 
 func (a *App) handleAbout(ctx context.Context, tg *tgb.Bot, update *models.Update) {
 	m := update.Message
-	if _, err := a.reply(ctx, m, render.About(a.build.RuntimeVer, a.build.VersionName, a.build.CommitSHA, a.build.BuildTime, a.build.BuildArch)); err != nil {
+	var plugins []string
+	if a.plugins != nil {
+		for _, info := range a.plugins.Info() {
+			plugins = append(plugins, info.Name)
+		}
+	}
+	if _, err := a.reply(ctx, m, render.About(a.build.RuntimeVer, a.build.VersionName, a.build.CommitSHA, a.build.BuildTime, a.build.BuildArch, plugins)); err != nil {
 		a.log.Errorln(err)
 	}
+}
+
+func (a *App) handleHelp(ctx context.Context, tg *tgb.Bot, update *models.Update) {
+	if _, err := a.reply(ctx, update.Message, a.helpText()); err != nil {
+		a.log.Errorln(err)
+	}
+}
+
+// helpText 按已安装的 provider 与插件命令生成帮助。
+func (a *App) helpText() string {
+	var sources []render.HelpSource
+	if a.providers != nil {
+		for _, p := range a.providers.Enabled() {
+			sources = append(sources, render.HelpSource{
+				Name:        p.Name(),
+				DisplayName: p.DisplayName(),
+				Code:        p.Code(),
+				Default:     p.Name() == a.providers.DefaultName(),
+			})
+		}
+	}
+	var commands []render.HelpCommand
+	if a.plugins != nil {
+		for _, pc := range a.plugins.Commands() {
+			usage := pc.Command.Usage
+			if usage == "" {
+				usage = "<ID/关键词>"
+				if pc.Command.CommandType() == "template" {
+					usage = "<参数>"
+				}
+			}
+			commands = append(commands, render.HelpCommand{Name: pc.Command.Name, Usage: usage, Description: pc.Command.Description})
+		}
+	}
+	return render.Help(sources, commands, a.me.Username)
+}
+
+// handlePlugin 无参数时列出插件状态，带插件名时显示其 manifest。
+func (a *App) handlePlugin(ctx context.Context, tg *tgb.Bot, update *models.Update) {
+	m := update.Message
+	if a.plugins == nil {
+		return
+	}
+	text := a.pluginStatusText()
+	if name := strings.TrimSpace(commandArguments(m)); name != "" {
+		text = render.PluginNotFound(name)
+		if p, ok := a.providers.Lookup(name); ok {
+			name = p.Name()
+		}
+		if manifest, ok := a.plugins.ManifestJSON(name); ok {
+			text = render.PluginManifest(a.providerDisplay(name), name, manifest)
+		}
+	}
+	if _, err := a.reply(ctx, m, text); err != nil {
+		a.log.Errorln(err)
+	}
+}
+
+func (a *App) pluginStatusText() string {
+	var items []render.PluginStatus
+	for _, info := range a.plugins.Info() {
+		status := render.PluginStatus{
+			Name:         info.Name,
+			DisplayName:  info.DisplayName,
+			Version:      info.Version,
+			Build:        plugin.BuildLabel(info.Commit, info.BuildTime),
+			Capabilities: info.Capabilities,
+			Instances:    info.Instances,
+			Default:      a.providers != nil && info.Name == a.providers.DefaultName(),
+			Updatable:    info.Updatable,
+			Path:         info.Path,
+		}
+		if _, ok := a.auth.Get(info.Name); ok {
+			status.Auth = "正常"
+			if !a.auth.Available(info.Name) {
+				status.Auth = "已失效，新歌下载暂停"
+			}
+		}
+		items = append(items, status)
+	}
+	return render.PluginStatusList(items)
 }
 
 func (a *App) handleStatus(ctx context.Context, tg *tgb.Bot, update *models.Update) {
@@ -35,14 +123,18 @@ func (a *App) handleStatus(ctx context.Context, tg *tgb.Bot, update *models.Upda
 	var text strings.Builder
 	text.WriteString(render.StatusInfo(m.Chat.Title, m.Chat.Username, m.Chat.ID, m.From.ID, total, byChat, byUser))
 	if a.plugins != nil {
-		for _, info := range a.plugins.Info() {
-			text.WriteString("\n")
-			text.WriteString(render.PluginLine(info.DisplayName, info.Name, info.Version, info.Commit, info.BuildTime, strings.Join(info.Capabilities, "/")))
+		if infos := a.plugins.Info(); len(infos) > 0 {
+			text.WriteString("\n<b>[插件]</b>")
+			for _, info := range infos {
+				text.WriteString("\n" + render.PluginLine(info.DisplayName, info.Name, info.Version, plugin.BuildLabel(info.Commit, info.BuildTime)))
+			}
 		}
 	}
-	for _, name := range a.auth.Names() {
-		text.WriteString("\n")
-		text.WriteString(render.AuthLine(name, a.auth.Available(name)))
+	if names := a.auth.Names(); len(names) > 0 {
+		text.WriteString("\n<b>[登录]</b>")
+		for _, name := range names {
+			text.WriteString("\n" + render.AuthLine(name, a.auth.Available(name)))
+		}
 	}
 	if _, err := a.reply(ctx, m, text.String()); err != nil {
 		a.log.Errorln(err)

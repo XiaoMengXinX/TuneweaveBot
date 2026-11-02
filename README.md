@@ -86,14 +86,15 @@ level = "hires"            # 优先音质，无权限时自动降级
 
 | 命令 | 说明 |
 | --- | --- |
-| `/music <ID/关键词>` | 用默认 provider 点歌；直接发送分享链接也可 |
+| `/music [provider] <ID/关键词>` | 点歌，如 `/music netease 晴天`；直接发送分享链接也可 |
 | `/search [provider] <关键词>` | 搜索并翻页（最多 5 页），按钮仅搜索者 10 分钟内可用 |
-| `/lyric <ID/关键词>` | 发送歌词文件；也可回复含分享链接的消息 |
+| `/lyric [provider] <ID/关键词>` | 发送歌词文件；也可回复含分享链接的消息 |
 | `/recognize` | 回复一条语音，识别歌曲 |
-| `/status` · `/about` | 缓存与插件状态 · 关于 |
+| `/help` | 列出全部命令、插件命令与可用来源 |
+| `/status` · `/about` | 缓存与插件状态 · 版本与已装插件 |
 | `/netease` · `/program` | 网易云插件声明的命令，按 ID 或关键词点歌 · 按节目 ID 点歌 |
 
-`provider` 可写插件名或短 code（如 `netease` / `ne`）。inline 模式输入 `help` 查看用法。
+`provider` 可写插件名或短 code（如 `netease` / `ne`），省略时用默认 provider。inline 模式输入 `help` 查看用法。
 
 ### 管理员
 
@@ -102,6 +103,7 @@ level = "hires"            # 优先音质，无权限时自动降级
 | `/login [provider] [token]` | 扫码登录，或带 `token` 后回复消息提交 token/cookie |
 | `/reload` | 等当前任务完成后重载配置与插件 |
 | `/checkupdate` | 检查插件更新 |
+| `/plugin [插件名]` | 查看插件状态（版本、构建、登录、更新）；带插件名时显示 manifest |
 | `/rmcache <ID/链接>` | 清除歌曲缓存 |
 | `/setcachechat [群 ID]` | 设置 Guest Mode 缓存群，`0` 关闭 |
 

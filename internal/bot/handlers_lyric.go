@@ -37,6 +37,7 @@ func (a *App) handleLyric(ctx context.Context, tg *tgb.Bot, update *models.Updat
 		}
 	}
 
+	providerName, query := a.parseProviderArgs(args)
 	var ref *provider.Ref
 	if source != m {
 		// 回复消息取歌词：只认链接，找不到就提示，不拿空关键词去搜索
@@ -48,11 +49,15 @@ func (a *App) handleLyric(ctx context.Context, tg *tgb.Bot, update *models.Updat
 			}
 			return
 		}
-	} else if matched, _, ok := a.providers.Match(ctx, args); ok {
+	} else if providerName != "" {
+		if matched, ok := a.providers.MatchProvider(ctx, providerName, query); ok {
+			ref = matched
+		}
+	} else if matched, _, ok := a.providers.Match(ctx, query); ok {
 		ref = matched
 	}
 	if ref == nil {
-		items, _, err := a.providers.Search(ctx, "", args, 5, 0)
+		items, _, err := a.providers.Search(ctx, providerName, query, 5, 0)
 		if err != nil {
 			a.log.Errorln(err)
 		}

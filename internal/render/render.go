@@ -70,7 +70,7 @@ const (
 
 	CheckingUpdates    = "正在检查插件更新..."
 	NoPluginUpdates    = "插件均已是最新版本"
-	NoUpdatablePlugins = "没有可检查更新的插件（插件需在 manifest 中声明 update_url 与 version_url）"
+	NoUpdatablePlugins = "没有可检查更新的插件"
 	UpdateNow          = "立即更新"
 	UpdateExpired      = "更新按钮已失效，请重新 /checkupdate"
 	UpdateBusy         = "已有插件更新在进行中"
@@ -239,7 +239,12 @@ func clampUTF16(s string, limit int) string {
 	return truncateUTF16(s, limit-1) + "…"
 }
 
-func About(runtimeVer, versionName, commitSHA, buildTime, buildArch string) string {
+// About plugins 为已安装插件名，为空时显示“无”。
+func About(runtimeVer, versionName, commitSHA, buildTime, buildArch string, plugins []string) string {
+	installed := "无"
+	if len(plugins) > 0 {
+		installed = strings.Join(plugins, ", ")
+	}
 	return fmt.Sprintf(`<b>TuneweaveBot</b>
 Github: https://github.com/XiaoMengXinX/TuneweaveBot
 
@@ -247,8 +252,9 @@ Github: https://github.com/XiaoMengXinX/TuneweaveBot
 [编译版本] %s
 [编译哈希] %s
 [编译日期] %s
-[运行环境] %s`,
-		Escape(runtimeVer), Escape(versionName), Escape(commitSHA), Escape(buildTime), Escape(buildArch))
+[运行环境] %s
+[已装插件] %s`,
+		Escape(runtimeVer), Escape(versionName), Escape(commitSHA), Escape(buildTime), Escape(buildArch), Escape(installed))
 }
 
 func StatusInfo(chatTitle, chatUsername string, chatID, userID, total, chatCount, userCount int64) string {
@@ -297,23 +303,20 @@ func SearchItemProvider(n int, name, artists, providerName string) string {
 		fmt.Sprintf("%d.", n), Escape(name), Escape(artists), Escape(providerName))
 }
 
-// PluginLine 是 /status 中的一行插件信息，commit 与 buildTime 为空时省略。
-func PluginLine(displayName, name, version, commit, buildTime, capabilities string) string {
-	build := ""
-	if len(commit) > 7 {
-		commit = commit[:7]
+// PluginLine 是 /status [插件] 段中的一行，build 为 commit 与构建时间，空时省略。
+func PluginLine(displayName, name, version, build string) string {
+	line := fmt.Sprintf("%s (%s) v%s", Escape(displayName), Escape(name), Escape(version))
+	if build != "" {
+		line += " [" + Escape(build) + "]"
 	}
-	if commit != "" || buildTime != "" {
-		build = fmt.Sprintf(" [%s]", Escape(strings.TrimSpace(commit+" "+buildTime)))
-	}
-	return fmt.Sprintf("<b>[插件]</b> %s (%s) v%s%s 能力: %s", Escape(displayName), Escape(name), Escape(version), build, Escape(capabilities))
+	return line
 }
 
-// AuthLine 是 /status 中的一行登录状态。
+// AuthLine 是 /status [登录] 段中的一行。
 func AuthLine(name string, available bool) string {
 	status := "正常"
 	if !available {
 		status = "已失效，新歌下载暂停"
 	}
-	return fmt.Sprintf("<b>[登录]</b> %s: %s", Escape(name), status)
+	return fmt.Sprintf("%s: %s", Escape(name), status)
 }

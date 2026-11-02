@@ -230,9 +230,11 @@ func (a *App) registerHandlers(tg *tgb.Bot) {
 	register("recognize", a.handleRecognize)
 	register("about", a.handleAbout)
 	register("status", a.handleStatus)
+	register("help", a.handleHelp)
 	register("rmcache", a.handleRmCache, a.adminOnly)
 	register("reload", a.handleReload, a.adminOnly)
 	register("checkupdate", a.handleCheckUpdate, a.adminOnly)
+	register("plugin", a.handlePlugin, a.adminOnly)
 	register("login", a.handleLogin, a.adminOnly)
 	register("setcachechat", a.handleSetCacheChat, a.adminOnly)
 

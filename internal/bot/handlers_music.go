@@ -37,14 +37,17 @@ func (a *App) handleStart(ctx context.Context, tg *tgb.Bot, update *models.Updat
 	}
 }
 
+// handleMusic 支持 /music [来源] <ID/关键词/链接>，未指定来源时用默认 provider。
 func (a *App) handleMusic(ctx context.Context, tg *tgb.Bot, update *models.Update) {
-	a.handleMusicArgs(ctx, update.Message, "")
+	m := update.Message
+	providerName, args := a.parseProviderArgs(commandArguments(m))
+	a.handleMusicArgs(ctx, m, providerName, args)
 }
 
 // handleProviderMusic 处理插件声明的 provider 命令（如 /netease），只在指定插件上匹配与搜索。
 func (a *App) handleProviderMusic(name string) tgb.HandlerFunc {
 	return func(ctx context.Context, tg *tgb.Bot, update *models.Update) {
-		a.handleMusicArgs(ctx, update.Message, name)
+		a.handleMusicArgs(ctx, update.Message, name, commandArguments(update.Message))
 	}
 }
 
@@ -73,8 +76,7 @@ func (a *App) handleTemplateMusic(name, template string) tgb.HandlerFunc {
 }
 
 // handleMusicArgs providerName 为空时使用默认 provider。
-func (a *App) handleMusicArgs(ctx context.Context, m *models.Message, providerName string) {
-	args := commandArguments(m)
+func (a *App) handleMusicArgs(ctx context.Context, m *models.Message, providerName, args string) {
 	if args == "" {
 		if _, err := a.reply(ctx, m, render.InputIDorKeyword); err != nil {
 			a.log.Errorln(err)

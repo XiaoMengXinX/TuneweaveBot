@@ -38,7 +38,7 @@ func (a *App) handleSearch(ctx context.Context, tg *tgb.Bot, update *models.Upda
 		a.log.Errorln(err)
 		return
 	}
-	providerName, keyword := a.parseSearchArgs(args)
+	providerName, keyword := a.parseProviderArgs(args)
 	text, keyboard, err := a.searchPage(ctx, providerName, keyword, 1)
 	if err != nil {
 		a.log.Errorln(err)
@@ -71,7 +71,7 @@ func (a *App) turnPage(ctx context.Context, msg *models.Message, data string) st
 	}
 	page, _ := strconv.Atoi(args[1])
 	query := commandArguments(msg.ReplyToMessage)
-	providerName, keyword := a.parseSearchArgs(query)
+	providerName, keyword := a.parseProviderArgs(query)
 	if page < 1 || page > searchMaxPage || keyword == "" || searchHash(searchKey(providerName, keyword)) != args[2] {
 		return render.SearchExpired
 	}
@@ -138,8 +138,8 @@ func (a *App) answerCallback(ctx context.Context, queryID, text string) {
 	}
 }
 
-// parseSearchArgs 首 token 是已启用的 provider 名/code 且后面还有关键词时，指定该 provider。
-func (a *App) parseSearchArgs(args string) (providerName, keyword string) {
+// parseProviderArgs 首 token 是已启用的 provider 名/code 且后面还有内容时，指定该 provider。
+func (a *App) parseProviderArgs(args string) (providerName, keyword string) {
 	fields := strings.Fields(args)
 	if len(fields) >= 2 {
 		if p, ok := a.providers.Lookup(fields[0]); ok {

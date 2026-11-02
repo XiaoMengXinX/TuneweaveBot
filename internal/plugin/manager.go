@@ -97,7 +97,11 @@ func (m *Manager) load(ctx context.Context, cfg Config) error {
 		}
 		m.plugins[p.manifest.Name] = p
 		m.order = append(m.order, p.manifest.Name)
-		m.runtime.log.Printf("已加载插件 %s v%s [%s] x%d", p.manifest.Name, p.manifest.Version, strings.Join(p.manifest.Capabilities, ", "), cap(p.pool))
+		build := BuildLabel(p.manifest.Commit, p.manifest.BuildTime)
+		if build == "" {
+			build = "无构建信息"
+		}
+		m.runtime.log.Printf("已加载插件 %s v%s (%s) [%s] x%d", p.manifest.Name, p.manifest.Version, build, strings.Join(p.manifest.Capabilities, ", "), cap(p.pool))
 	}
 	if len(m.order) == 0 {
 		return fmt.Errorf("插件目录 %s 中没有可加载的 .wasm 插件", cfg.Dir)
@@ -278,6 +282,9 @@ type PluginInfo struct {
 	Commit       string
 	BuildTime    string
 	Capabilities []string
+	Path         string // 加载的插件文件
+	Instances    int    // 常驻实例数
+	Updatable    bool   // manifest 声明了更新地址
 }
 
 // PluginConfigSchema 是一个插件声明的配置项集合，供生成/补全配置使用。
@@ -315,9 +322,30 @@ func (m *Manager) Info() []PluginInfo {
 			Commit:       p.manifest.Commit,
 			BuildTime:    p.manifest.BuildTime,
 			Capabilities: append([]string(nil), p.manifest.Capabilities...),
+			Path:         p.path,
+			Instances:    cap(p.pool),
+			Updatable:    p.manifest.UpdateURL != "",
 		})
 	}
 	return out
+}
+
+// ManifestJSON 返回插件 manifest 的格式化 JSON。
+func (m *Manager) ManifestJSON(name string) ([]byte, bool) {
+	p, ok := m.plugins[name]
+	if !ok {
+		return nil, false
+	}
+	data, err := json.MarshalIndent(p.manifest, "", "  ")
+	return data, err == nil
+}
+
+// BuildLabel 返回 "commit 前 7 位 构建时间"，未注入构建信息时返回空串。
+func BuildLabel(commit, buildTime string) string {
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	return strings.TrimSpace(commit + " " + buildTime)
 }
 
 // Rollbacks 返回本次加载中因新版本加载失败而回滚的插件。

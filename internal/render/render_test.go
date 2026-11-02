@@ -32,7 +32,7 @@ func TestEscapeInTemplates(t *testing.T) {
 		t.Errorf("状态消息未转义: %s", status)
 	}
 
-	about := About("go1.22", "v3<a", "sha", "2024", "darwin/arm64")
+	about := About("go1.22", "v3<a", "sha", "2024", "darwin/arm64", []string{"netease"})
 	if strings.Contains(about, "v3<a") {
 		t.Errorf("about 未转义: %s", about)
 	}
@@ -112,5 +112,45 @@ func TestSearchItem(t *testing.T) {
 	}
 	if got := SearchPage(2, 5); got != "<code>第[2/5]页</code>\n" {
 		t.Errorf("SearchPage = %q", got)
+	}
+}
+
+func TestPluginManifest(t *testing.T) {
+	out := PluginManifest("网易云<音乐>", "netease", []byte(`{"name":"<x>"}`))
+	if !strings.Contains(out, "&lt;x&gt;") || strings.Contains(out, "<x>") || !strings.Contains(out, "网易云&lt;音乐&gt;") {
+		t.Errorf("manifest 未转义: %s", out)
+	}
+	long := PluginManifest("n", "n", []byte(strings.Repeat("字", manifestLimit+10)))
+	if !strings.Contains(long, "已截断") || utf8.RuneCountInString(long) > 4096 {
+		t.Errorf("超长 manifest 未截断，长度 %d", utf8.RuneCountInString(long))
+	}
+}
+
+func TestPluginStatusList(t *testing.T) {
+	out := PluginStatusList([]PluginStatus{
+		{Name: "netease", DisplayName: "网易云音乐", Version: "1.0.0", Build: "7f302d5 2026-11-02T21:50:19Z",
+			Capabilities: []string{"provider", "auth"}, Instances: 2, Default: true, Auth: "正常", Updatable: true, Path: "plugins/netease.wasm.gz"},
+		{Name: "example", DisplayName: "示例", Version: "0.1.0", Capabilities: []string{"provider"}, Instances: 1, Path: "plugins/example.wasm"},
+	})
+	for _, want := range []string{"网易云音乐</b> (<code>netease</code>) · 默认", "v1.0.0（7f302d5 2026-11-02T21:50:19Z）",
+		"常驻实例 2", "登录：正常", "自动更新：已启用", "v0.1.0（无构建信息）", "自动更新：未声明更新地址", "/plugin 插件名"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("状态缺少 %q:\n%s", want, out)
+		}
+	}
+	if strings.Count(out, "登录：") != 1 {
+		t.Errorf("不需要登录的插件不应显示登录状态:\n%s", out)
+	}
+}
+
+func TestStatusLines(t *testing.T) {
+	if got := PluginLine("网易云音乐", "netease", "1.0.0", "7f302d5 2026-11-02T22:00:55Z"); got != "网易云音乐 (netease) v1.0.0 [7f302d5 2026-11-02T22:00:55Z]" {
+		t.Errorf("PluginLine = %q", got)
+	}
+	if got := PluginLine("示例", "example", "0.1.0", ""); got != "示例 (example) v0.1.0" {
+		t.Errorf("无构建信息时不应显示括号: %q", got)
+	}
+	if got := AuthLine("spotify", true); got != "spotify: 正常" {
+		t.Errorf("AuthLine = %q", got)
 	}
 }
