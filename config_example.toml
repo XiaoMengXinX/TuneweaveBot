@@ -30,7 +30,6 @@ update_cron = "0 4 * * *"        # 自动检查插件更新的 cron 表达式（
 [plugins.netease]
 music_u = "你的 MUSIC_U cookie" # 可留空：留空或失效时用管理员命令 /login 扫码或 /login netease token 提交 cookie 登录
 level = "hires"                  # 优先音质: standard/higher/lossless/hires/jyeffect(高清环绕声)/sky(沉浸环绕声)/jymaster(超清母带)，账号无权限时自动降级
-# 环境变量覆盖：TUNEWEAVE_PLUGINS_CONFIG_NETEASE_LEVEL=lossless
 
 [database]
 path = "cache.db" # SQLite 数据库路径

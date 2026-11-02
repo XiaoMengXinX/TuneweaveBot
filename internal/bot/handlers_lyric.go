@@ -87,7 +87,7 @@ func (a *App) handleLyric(ctx context.Context, tg *tgb.Bot, update *models.Updat
 		return
 	}
 
-	// 歌词直接从内存上传，避免落盘引起的并发同名文件互相截断
+	// 歌词直接从内存上传
 	fileName := songFileName(textx.JoinNames(lyric.Artists), lyric.Title, "lrc")
 	params := &tgb.SendDocumentParams{
 		ChatID:          source.Chat.ID,

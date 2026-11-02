@@ -75,8 +75,8 @@ level = "hires"            # 优先音质，无权限时自动降级
 ```
 
 - 完整配置项及说明见 `config_example.toml`，或用 `./TuneweaveBot gen-config` 按已装插件生成
-- 环境变量可覆盖任意配置：`TUNEWEAVE_BOT_TOKEN`、`TUNEWEAVE_DOWNLOAD_TIMEOUT`；插件配置用
-  `TUNEWEAVE_PLUGINS_CONFIG_<插件名>_<键>`，如 `TUNEWEAVE_PLUGINS_CONFIG_NETEASE_LEVEL=lossless`
+- 环境变量可覆盖 `[bot]`、`[plugins]`、`[database]`、`[download]`、`[log]` 的配置项，格式为
+  `TUNEWEAVE_<段>_<键>`，如 `TUNEWEAVE_BOT_TOKEN`、`TUNEWEAVE_DOWNLOAD_TIMEOUT`；`[plugins.<名称>]` 插件配置段不支持
 - 启动时若缺少插件声明的配置项会自动补全（终端运行时先询问）
 - 指令菜单启动时自动注册；inline 模式需在 @BotFather 手动开启
 

@@ -76,7 +76,7 @@ func (a *App) handlePlugin(ctx context.Context, tg *tgb.Bot, update *models.Upda
 			name = p.Name()
 		}
 		if manifest, ok := a.plugins.ManifestJSON(name); ok {
-			text = render.PluginManifest(a.providerDisplay(name), name, manifest)
+			text = render.PluginManifest(a.pluginDisplayName(name), name, manifest)
 		}
 	}
 	if _, err := a.reply(ctx, m, text); err != nil {

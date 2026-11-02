@@ -110,7 +110,7 @@ func (a *App) readVoice(ctx context.Context, voice *models.Voice) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	// 识曲只需内存中的字节，无需落盘
+	// 识曲直接读取内存中的字节
 	source, cleanup, err := a.openVoice(ctx, file)
 	if err != nil {
 		return nil, err

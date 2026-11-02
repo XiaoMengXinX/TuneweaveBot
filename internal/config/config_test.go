@@ -554,8 +554,8 @@ func TestPluginsEnvOverride(t *testing.T) {
 	if len(cfg.Plugins.Enabled) != 2 || cfg.Plugins.Enabled[1] != "qq" {
 		t.Errorf("enabled = %v", cfg.Plugins.Enabled)
 	}
-	if got := cfg.Plugins.Config["netease"]["level"]; got != "sky" {
-		t.Errorf("netease level = %v", got)
+	if _, ok := cfg.Plugins.Config["netease"]["level"]; ok {
+		t.Errorf("插件段不应被环境变量覆盖: %v", cfg.Plugins.Config["netease"])
 	}
 }
 

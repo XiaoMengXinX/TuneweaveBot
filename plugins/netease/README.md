@@ -26,8 +26,6 @@ level = "hires"    # 优先音质，账号无权限时自动降级
 - `level`：`standard`/`higher`/`lossless`/`hires`/`jyeffect`（高清环绕声）/`sky`（沉浸环绕声）/
   `jymaster`（超清母带）。账号无权限的音质自动降级。
 
-环境变量覆盖：`TUNEWEAVE_PLUGINS_CONFIG_NETEASE_LEVEL=lossless`。
-
 ## 登录
 
 支持两种方式，由 `/login netease [token]` 选择：

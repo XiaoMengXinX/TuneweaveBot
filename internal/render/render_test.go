@@ -150,7 +150,7 @@ func TestStatusLines(t *testing.T) {
 	if got := PluginLine("示例", "example", "0.1.0", ""); got != "示例 (example) v0.1.0" {
 		t.Errorf("无构建信息时不应显示括号: %q", got)
 	}
-	if got := AuthLine("spotify", true); got != "spotify: 正常" {
+	if got := AuthLine("example", true); got != "example: 正常" {
 		t.Errorf("AuthLine = %q", got)
 	}
 }

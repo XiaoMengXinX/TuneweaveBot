@@ -233,7 +233,7 @@ func extractPluginSections(data []byte) ([]byte, map[string]map[string]any, erro
 	return stripped, sections, nil
 }
 
-// splitPluginInstances 取出各插件段中由宿主解释的 instances，不再传给插件。
+// splitPluginInstances 取出各插件段中由宿主解释的 instances，不传给插件。
 func splitPluginInstances(sections map[string]map[string]any) (map[string]int, error) {
 	out := make(map[string]int)
 	for name, section := range sections {
@@ -262,7 +262,7 @@ func (c *Config) setPluginValue(name, key string, value any) {
 	c.Plugins.Config[name][key] = value
 }
 
-// Validate 允许 music_u 为空，由启动流程引导登录
+// Validate 校验宿主配置项；插件凭据由各插件自行处理，可留空后用 /login 登录。
 func (c *Config) Validate() error {
 	if c.Bot.Token == "" {
 		return fmt.Errorf("配置项 [bot] token 不能为空")
@@ -328,37 +328,13 @@ const envPrefix = "TUNEWEAVE_"
 
 // applyEnv 用 TUNEWEAVE_<段>_<键> 环境变量覆盖配置项
 func applyEnv(cfg *Config) error {
-	if err := walkStruct(reflect.ValueOf(cfg).Elem(), "", func(v reflect.Value, envName string) error {
+	return walkStruct(reflect.ValueOf(cfg).Elem(), "", func(v reflect.Value, envName string) error {
 		s, ok := os.LookupEnv(envName)
 		if !ok {
 			return nil
 		}
 		return setFromString(v, s, envName)
-	}); err != nil {
-		return err
-	}
-	return applyPluginEnv(cfg)
-}
-
-// applyPluginEnv 支持 TUNEWEAVE_PLUGINS_CONFIG_<NAME>_<KEY>（字符串值），
-// 覆盖 [plugins.<name>] 段中的键；前缀保留 CONFIG 以免与 [plugins] 宿主字段冲突。
-func applyPluginEnv(cfg *Config) error {
-	const prefix = "TUNEWEAVE_PLUGINS_CONFIG_"
-	for _, env := range os.Environ() {
-		key, value, ok := strings.Cut(env, "=")
-		if !ok || !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		rest := strings.TrimPrefix(key, prefix)
-		i := strings.LastIndexByte(rest, '_')
-		if i <= 0 || i == len(rest)-1 {
-			continue
-		}
-		name := strings.ToLower(rest[:i])
-		keyName := strings.ToLower(rest[i+1:])
-		cfg.setPluginValue(name, keyName, value)
-	}
-	return nil
+	})
 }
 
 func walkStruct(v reflect.Value, path string, fn func(reflect.Value, string) error) error {
@@ -372,7 +348,7 @@ func walkStruct(v reflect.Value, path string, fn func(reflect.Value, string) err
 		envName := envPrefix + strings.ToUpper(path+name)
 		fv := v.Field(i)
 		if fv.Kind() == reflect.Map {
-			// 插件配置段用 TUNEWEAVE_PLUGINS_CONFIG_<NAME>_<KEY> 单独处理
+			// 插件配置段 [plugins.<name>] 不支持环境变量覆盖
 			continue
 		}
 		// 嵌套配置段递归展开；Duration 的底层是 Int64，不会进入此分支

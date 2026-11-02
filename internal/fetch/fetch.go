@@ -52,7 +52,7 @@ func (dl *Downloader) DownloadFile(url, fileName string) error {
 	return task.SetFileName(fileName).Download()
 }
 
-// 首次不使用反代，失败后按配置切换并复用任务续传
+// DownloadMusic 下载歌曲，失败时按 retries 重试并复用任务续传
 func (dl *Downloader) DownloadMusic(ctx context.Context, req Request, progress func(Progress)) error {
 	task, err := dl.d.NewDownloadTask(req.URL)
 	if err != nil {

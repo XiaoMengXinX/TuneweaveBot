@@ -15,7 +15,7 @@ func GenerateTemplate(schemas []plugin.PluginConfigSchema) []byte {
 	var b strings.Builder
 
 	b.WriteString("# TuneweaveBot 配置模板（由 gen-config 生成）\n")
-	b.WriteString("# 所有配置项都可用环境变量覆盖，如 TUNEWEAVE_BOT_TOKEN、TUNEWEAVE_DOWNLOAD_TIMEOUT\n\n")
+	b.WriteString("# 宿主配置项（不含 [plugins.<名称>] 插件段）可用环境变量覆盖，如 TUNEWEAVE_BOT_TOKEN、TUNEWEAVE_DOWNLOAD_TIMEOUT\n\n")
 
 	b.WriteString("[bot]\n")
 	b.WriteString("token = \"\"                              # 必填，BotFather 给的 token\n")

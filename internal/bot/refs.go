@@ -68,7 +68,7 @@ func (a *App) decodeRef(s string) (provider.Ref, bool) {
 		return provider.Ref{}, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(payload)
-	if err != nil || len(raw) == 0 {
+	if err != nil {
 		return provider.Ref{}, false
 	}
 	ref := provider.Ref{Provider: p.Name()}
