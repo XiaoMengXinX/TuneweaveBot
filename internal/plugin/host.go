@@ -18,6 +18,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/tetratelabs/wazero/api"
 
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/fetch"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
 )
 
@@ -34,6 +35,10 @@ type instanceState struct {
 	mediaCapable bool                  // manifest 是否声明 "media" 能力
 	mediaDir     string                // 媒体文件落盘目录
 	mediaSinks   map[string]*mediaSink // token -> 打开的写入会话
+	scratchDir   string                // media.download 落盘目录（宿主路径）
+	downloads    []string              // 本次调用中 media.download 落盘的文件
+	downloader   *fetch.Downloader
+	allowPrivate bool
 
 	// pending 暂存一次因缓冲区不足未能写回的响应，等待插件扩容后用 host.take 取走。
 	// 每个实例同一时刻只有一个在途 host.call，无需加锁。
@@ -203,6 +208,17 @@ func (s *instanceState) dispatch(ctx context.Context, name string, req []byte) (
 
 	case "media.open", "media.write", "media.close", "media.abort":
 		return s.dispatchMedia(name, req)
+
+	case "media.download":
+		var in mediaDownloadRequest
+		if err := json.Unmarshal(req, &in); err != nil {
+			return nil, err
+		}
+		out, err := s.mediaDownload(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		return okResponse(out)
 
 	default:
 		return nil, fmt.Errorf("unknown host call %q", name)

@@ -97,7 +97,7 @@ func (a *App) cacheMusic(ctx context.Context, ref, display provider.Ref, track *
 		return store.SongInfo{}, err
 	}
 	defer a.musicSem.Release(1)
-	if songInfo, ok := a.store.GetByRef(ref.Provider, ref.ID); ok {
+	if songInfo, ok := a.store.GetByRef(ref.Provider, ref.ID); ok && songInfo.FileID != "" {
 		return songInfo, nil
 	}
 	return a.fetchMusic(ctx, ref, display, track, m, nil, chatID, nil, func(string) error { return nil })

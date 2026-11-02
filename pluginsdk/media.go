@@ -63,3 +63,41 @@ func (m *MediaSink) Abort() error {
 	m.closed = true
 	return callHost("media.abort", map[string]string{"token": m.token}, nil)
 }
+
+// DownloadResult 是 DownloadToScratch 的结果。
+type DownloadResult struct {
+	Path string // 沙箱内路径，可直接 os.Open
+	Size int64
+}
+
+type DownloadOptions struct {
+	Headers map[string]string
+	// Title/Album 随下载进度上报，供宿主在状态消息中展示
+	Title string
+	Album string
+}
+
+// DownloadToScratch 由宿主多线程下载 url 到可写挂载目录。文件只在本次调用内有效，
+// 调用结束后宿主会删除。需要 manifest 声明 "media" 能力，opts 可为 nil。
+func (c *Context) DownloadToScratch(url string, opts *DownloadOptions) (*DownloadResult, error) {
+	var out struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	}
+	req := map[string]any{"url": url}
+	if opts != nil {
+		if len(opts.Headers) > 0 {
+			req["headers"] = opts.Headers
+		}
+		if opts.Title != "" {
+			req["title"] = opts.Title
+		}
+		if opts.Album != "" {
+			req["album"] = opts.Album
+		}
+	}
+	if err := callHost("media.download", req, &out); err != nil {
+		return nil, err
+	}
+	return &DownloadResult{Path: out.Path, Size: out.Size}, nil
+}

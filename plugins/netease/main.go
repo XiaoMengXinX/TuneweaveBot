@@ -32,7 +32,8 @@ func manifest() Manifest {
 			{Name: "netease", Description: "使用网易云音乐点歌"},
 			{Name: "program", Description: "按节目 ID 点歌", Type: "template", Template: "https://music.163.com/program?id={args}"},
 		},
-		Resources: Resources{MemoryMB: 128, Instances: 1},
+		Resources: Resources{MemoryMB: 128, Instances: 4},
+		LinkHosts: []string{"music.163.com", "163cn.tv", "163cn.link"},
 		HTTPAllowedHosts: []string{
 			"music.163.com",
 			"interface.music.163.com",

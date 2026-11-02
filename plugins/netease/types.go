@@ -77,6 +77,7 @@ type Manifest struct {
 	Commands         []Command     `json:"commands"`
 	Resources        Resources     `json:"resources"`
 	HTTPAllowedHosts []string      `json:"http_allowed_hosts"`
+	LinkHosts        []string      `json:"link_hosts,omitempty"`
 	ConfigSchema     []ConfigField `json:"config_schema,omitempty"`
 }
 

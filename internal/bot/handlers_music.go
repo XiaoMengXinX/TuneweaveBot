@@ -15,6 +15,7 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/fetch"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/plugin"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/provider"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/render"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
@@ -204,7 +205,7 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, message *model
 
 	// 凭据失效不影响缓存发送
 	if !a.auth.Available(canonical.Provider) {
-		if _, err := a.reply(ctx, message, render.CookieExpired); err != nil {
+		if _, err := a.reply(ctx, message, render.CookieExpired(a.providerDisplay(canonical.Provider))); err != nil {
 			a.log.Errorln(err)
 		}
 		return nil
@@ -256,7 +257,21 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 	}
 
 	if track == nil {
-		resolved, err := a.providers.Resolve(ctx, ref)
+		// 插件在 resolve 内经 media.download 下载时的进度，节流 5s
+		var lastProgress int64
+		resolveCtx := plugin.WithDownloadProgress(ctx, func(p plugin.DownloadProgress) {
+			if p.Total <= 0 || time.Now().Unix()-lastProgress < 5 {
+				return
+			}
+			lastProgress = time.Now().Unix()
+			percent := p.Written * 100 / p.Total
+			text := render.DownloadingWithInfo(p.Title, p.Album, p.Speed,
+				float64(p.Written)/1024/1024, float64(p.Total)/1024/1024, percent)
+			if err := status(text); err != nil {
+				a.log.Errorln(err)
+			}
+		})
+		resolved, err := a.providers.Resolve(resolveCtx, ref)
 		if err != nil {
 			if resolved != nil {
 				a.fillSongInfo(&songInfo, resolved, ref, message)
@@ -314,10 +329,6 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		}
 	}
 
-	if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, render.Downloading)); err != nil {
-		return songInfo, err
-	}
-
 	timeStamp := time.Now().UnixMicro()
 	var musicFileName string
 	if mediaPath != "" {
@@ -344,25 +355,31 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 	}
 
 	if mediaPath != "" {
-		// 插件已把解密后的音频落盘，移动到缓存目录即可，避免再复制一遍大文件。
+		// 插件已在 resolve 内落盘，优先 rename 避免复制大文件
 		if err := os.Rename(mediaPath, musicPath); err != nil {
-			if err := copyFile(mediaPath, musicPath); err != nil {
+			err := copyFile(mediaPath, musicPath)
+			_ = os.Remove(mediaPath)
+			if err != nil {
 				a.showDownloadFailed(status, songInfo, render.DownloadFailed)
 				return songInfo, err
 			}
-			_ = os.Remove(mediaPath)
 		}
-		// media 旁路下 track.Size 通常为 0（插件未必知道解密后大小），用落盘文件回填。
+		// media 路径下插件不提供 Size，以落盘文件为准
 		if info, err := os.Stat(musicPath); err == nil {
 			songInfo.MusicSize = int(info.Size())
 		}
-	} else if err := a.dl.DownloadMusic(ctx, fetch.Request{
-		URL:      track.AudioURL,
-		FileName: musicFileName,
-		Policy:   track.Download,
-	}, onProgress); err != nil {
-		a.showDownloadFailed(status, songInfo, render.DownloadFailed)
-		return songInfo, err
+	} else {
+		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, render.Downloading)); err != nil {
+			return songInfo, err
+		}
+		if err := a.dl.DownloadMusic(ctx, fetch.Request{
+			URL:      track.AudioURL,
+			FileName: musicFileName,
+			Policy:   track.Download,
+		}, onProgress); err != nil {
+			a.showDownloadFailed(status, songInfo, render.DownloadFailed)
+			return songInfo, err
+		}
 	}
 
 	// 音频下载成功后立即注册清理，确保后续任一步骤失败都不残留临时文件

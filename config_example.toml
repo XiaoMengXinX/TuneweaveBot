@@ -15,9 +15,9 @@ debug = false                                 # 在终端输出 SDK 调试日志
 dir = "./plugins"                # .wasm 插件目录，构建后由 build-plugins.sh 复制到这里
 enabled = []                     # 要加载的插件名（文件名去掉 .wasm）；留空 = 加载目录下全部
 default = "netease"              # 默认 provider，/music、/search、/login 未指定时使用
-instances = 1                    # 每个插件的实例池大小；识曲等耗时插件可适当增加
+instances = 2                    # 每个插件常驻的实例数，处理搜索/匹配等轻量调用；可在 [plugins.<name>] 中用 instances 单独覆盖
 call_timeout = "30s"             # 单次插件调用超时
-memory_mb = 256                  # 单个插件实例内存上限；数据面重的插件（如 Spotify 解密）需要更高
+memory_mb = 128                  # 单个插件实例内存上限
 http_max_bytes = 16777216        # 插件单次 HTTP 响应大小上限
 allow_private_networks = false   # 是否允许插件访问/下载私网地址（默认拒绝，防止 SSRF）
 proxy = ""                       # 所有插件 HTTP 及宿主下载共用的代理，留空保留环境代理
@@ -31,12 +31,7 @@ music_u = "你的 MUSIC_U cookie" # 可留空：留空或失效时用管理员�
 level = "hires"                  # 优先音质: standard/higher/lossless/hires/jyeffect(高清环绕声)/sky(沉浸环绕声)/jymaster(超清母带)，账号无权限时自动降级
 # 环境变量覆盖：TUNEWEAVE_PLUGINS_CONFIG_NETEASE_LEVEL=lossless
 
-# Spotify 插件需要数据面解密，默认未启用。启用前先 PLUGINS="spotify" bash build-plugins.sh 构建，
-# 并把插件名加进上面的 enabled。详见 plugins/spotify/README.md。
-# [plugins.spotify]
-# sp_dc = ""        # 登录 open.spotify.com 后 Cookie 里的 sp_dc；留空可用 /login spotify token 提交
-# wvd_path = ""     # Widevine L3 设备文件(.wvd)路径，相对上面的 [plugins] fs_dir；解密音频必需
-# market = "US"     # 元数据/搜索的地区代码(ISO 3166-1 alpha-2)
+# Spotify 插件在独立仓库维护，构建与配置见 https://github.com/XiaoMengXinX/TuneweaveBot-Spotify
 
 [database]
 path = "cache.db" # SQLite 数据库路径
@@ -44,7 +39,7 @@ path = "cache.db" # SQLite 数据库路径
 [download]
 timeout = "120s"       # 单次下载请求超时
 retries = 3           # 下载失败后的重试次数
-concurrency = 4       # 同时下载任务数
+concurrency = 4       # 同时进行的下载/识曲任务数，每个任务占用一个临时插件实例
 
 [log]
 level = "info" # trace/debug/info/warn/error

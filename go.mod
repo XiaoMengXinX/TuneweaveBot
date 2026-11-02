@@ -3,6 +3,7 @@ module github.com/XiaoMengXinX/TuneweaveBot
 go 1.26.0
 
 require (
+	github.com/Eyevinn/mp4ff v0.61.0
 	github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936
 	github.com/XiaoMengXinX/Music163Api-Go v0.1.32-0.20261026151159-9167996e9052 // indirect
 	github.com/XiaoMengXinX/SimpleDownloader v0.0.0-20261025221656-fa61ae8f8717

@@ -80,9 +80,9 @@ concurrency = 4
 dir = "./plugins"          # .wasm 插件目录
 enabled = ["netease"]      # 空 = 加载目录下全部插件
 default = "netease"        # 默认 provider
-instances = 1              # 每个插件的实例池大小
+instances = 2              # 每个插件常驻的实例数（处理搜索等轻量调用），可在 [plugins.<name>] 中覆盖
 call_timeout = "30s"       # 单次插件调用超时
-memory_mb = 256            # 单实例内存上限（数据面重的插件如 Spotify 解密需要更高）
+memory_mb = 128            # 单实例内存上限
 http_max_bytes = 16777216  # 插件单次 HTTP 响应上限
 allow_private_networks = false  # 插件 HTTP 与下载是否允许私网地址（默认拒绝，防 SSRF）
 proxy = ""                 # 所有插件 HTTP 及宿主下载共用的代理，如 http://127.0.0.1:8080 或 socks5://127.0.0.1:1080

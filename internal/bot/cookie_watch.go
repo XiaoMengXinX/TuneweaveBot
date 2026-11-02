@@ -50,7 +50,7 @@ func (a *App) pauseDownloads(ctx context.Context, providerName string) {
 		return
 	}
 	a.log.Warnf("%s 凭据已失效，暂停新歌下载", providerName)
-	a.notifyAdmins(ctx, render.CookieExpiredAdminWarn, nil)
+	a.notifyAdmins(ctx, render.CookieExpiredAdminWarn(a.providerDisplay(providerName), providerName), nil)
 
 	warnCtx, cancel := context.WithCancel(context.Background())
 	a.warnMu.Lock()
@@ -70,7 +70,7 @@ func (a *App) pauseDownloads(ctx context.Context, providerName string) {
 				return
 			case <-ticker.C:
 				if !a.auth.Available(providerName) {
-					a.notifyAdmins(ctx, render.CookieExpiredAdminWarn, nil)
+					a.notifyAdmins(ctx, render.CookieExpiredAdminWarn(a.providerDisplay(providerName), providerName), nil)
 				}
 			}
 		}
@@ -88,7 +88,7 @@ func (a *App) resumeDownloads(ctx context.Context, providerName string) {
 	resumed := a.auth.SetAvailable(providerName, true)
 	if warnCancel != nil && resumed {
 		a.log.Printf("%s 凭据已生效，恢复新歌下载", providerName)
-		a.notifyAdmins(ctx, render.CookieResumedAdmin, nil)
+		a.notifyAdmins(ctx, render.CookieResumedAdmin(a.providerDisplay(providerName)), nil)
 	}
 }
 

@@ -9,8 +9,9 @@ import (
 	"path/filepath"
 )
 
-// maxMediaBytes 单个媒体文件的写入上限，防止插件写爆磁盘。
-const maxMediaBytes = 256 << 20
+// maxMediaBytes 是插件单个媒体文件（media.write / media.download）的上限，
+// 取 Local Bot API Server 的上传上限：更大的文件 bot 发不出去，落盘只会白占磁盘。
+const maxMediaBytes int64 = 2 << 30
 
 // maxOpenMediaSinks 单实例同时打开的写入会话上限。
 const maxOpenMediaSinks = 4

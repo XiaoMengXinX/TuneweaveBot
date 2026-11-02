@@ -74,8 +74,13 @@ CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm \
 
 ## 3. 运行模型
 
-每个插件被实例化成一个实例池（大小由 `resources.instances` 或 `[plugins] instances`
-决定）。宿主对实例做如下保证：
+每个插件有一个常驻实例池，大小取 `[plugins.<name>] instances`（未设置时用
+`[plugins] instances`，默认 2），再以 manifest 的 `resources.instances` 为上限，最多 16。
+
+`provider.resolve` 与 `recognizer.recognize` 是重任务，不占用常驻池：每次调用都新建一个
+临时实例（执行 `init` 后调用），结束即销毁。全局同时进行的重任务数受 `[download]
+concurrency` 限制。这样下载再多也不会挡住搜索、翻页等轻量调用，重任务的峰值内存也随
+实例销毁归还。宿主对实例做如下保证：
 
 - **并发**：同一池内的实例并行处理不同调用；池满时调用方排队。
 - **自愈**：实例 panic、trap、超时或 OOM 时，宿主丢弃该实例并重建，重建时会重新
@@ -146,6 +151,7 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 | `provider.match` | `{text}` → `{ref}` 或 `{ref:null}` | provider |
 | `provider.canonicalize` | `{ref}` → `{ref}` | provider |
 | `provider.resolve` | `{ref}` → `{track}` | provider |
+| `provider.metadata` | `{ref}` → `{track: {ref,title,artists,album,duration_ms}}` | provider（可选） |
 | `provider.search` | `{keyword,limit,offset}` → `{items,total}` | provider |
 | `provider.lyrics` | `{ref}` → `{lrc,title,artists,album}` | provider |
 | `recognizer.recognize` | `{audio(b64),mime}` → `{ref}` | recognizer |
@@ -163,6 +169,8 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
   请求（短链跳转除外）。无法识别时返回 `{ref:null}`。
 - `provider.canonicalize`：把节目、电台等子资源归一成可缓存的歌曲 `ref`。
 - `provider.resolve`：返回元数据与可下载音频；没有音频时在 track 里用 `no_audio` 标记。
+- `provider.metadata`：只返回展示用元数据（Guest Mode 等场景）。未实现时宿主回退到
+  `provider.resolve`；resolve 代价高（如需下载解密）的插件应当实现它。
 
 ### Manifest
 
@@ -183,6 +191,7 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
   ],
   "resources": {"memory_mb": 128, "instances": 1},
   "http_allowed_hosts": ["example.com"],
+  "link_hosts": ["example.com"],
   "config_schema": [
     {"key": "token", "type": "string", "default": "", "secret": true,
      "comment": "登录凭据，可用 /login 获取"}
@@ -193,8 +202,12 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 - `name`：`^[a-z0-9][a-z0-9_-]{0,31}$`，用于 `[plugins] enabled/default` 与 `/search <name>`
 - `code`：`^[a-z0-9]{1,8}$`，用于 Telegram 回调/start 参数（`code_base64url(id)`）
 - `commands.type`：`provider`（默认，参数交给该插件）或 `template`（`{args}` 替换后生成链接再解析）
-- `http_allowed_hosts`：为空表示不限制；支持 `*.example.com` 通配
-- `resources.instances`：覆盖全局实例池大小；`memory_mb` 目前仅作文档提示
+- `http_allowed_hosts`：为空表示禁止一切 HTTP；支持 `*.example.com` 通配
+- `link_hosts`：`provider.match` 能识别的链接域名（子串匹配）。声明后，像链接的文本只有
+  包含其中某个域名时才会调用该插件的 `provider.match`；纯 ID 等不像链接的文本不受影响。
+  不声明则每条消息都会调用
+- `resources.instances`：插件支持的最大实例数，运维配置超过它时按它截断；`memory_mb`
+  目前仅作文档提示
 
 ### config_schema
 
@@ -212,7 +225,24 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 
 插件返回的 `ref`、`track`、`track summary` 字段与宿主 `internal/provider/types.go`
 一致。`ref.page_url` / `ref.share_text` 在没有额外 RPC 时提供展示链接，`track` 中的
-同名字段优先。`track.tag_format` 可选 `netease163key`、`id3` 或空。
+同名字段优先。`track.bit_rate` 单位为 bps。
+
+`track.tag_format` 可选 `netease163key`、`id3` 或空（不写标签）。`id3` 是通用格式，宿主按
+文件类型写成 ID3（mp3）、Vorbis comment（flac）或 iTunes ilst（m4a/mp4），封面由宿主
+下载并嵌入。`track.tag_payload` 结构：
+
+```json
+{
+  "title": "...", "artists": ["..."], "album": "...",
+  "album_artists": ["..."], "date": "2024-05-01",
+  "track_number": 3, "track_total": 12, "disc_number": 1, "disc_total": 1,
+  "composers": ["..."], "copyright": "℗ 2024 ...",
+  "custom": {"ISRC": "...", "label": "..."}
+}
+```
+
+除 `title`/`artists`/`album` 外均可省略；`custom` 写成 TXXX、同名 Vorbis 字段或
+`----:com.apple.iTunes:<key>`。
 
 `command.handle`、`callback.handle`、`inline.handle`、`message.match` 为 ABI 预留，v1 不调用。
 
@@ -263,7 +293,7 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 HTTP 约定：
 
 - 只允许 http/https；默认拒绝环回、私网、链路本地地址（宿主可配置）
-- `http_allowed_hosts` 非空时只允许列出的 host
+- 只允许 `http_allowed_hosts` 列出的 host
 - 不自动跟随重定向（`CheckRedirect = ErrUseLastResponse`），由插件自己处理
 - 4xx/5xx 作为正常响应返回，只有传输错误才是 host error
 - 单次响应体有大小上限（`[plugins] http_max_bytes`，默认 8MB）
@@ -295,9 +325,15 @@ JSON 响应一次性穿过 ABI 既撞 `http_max_bytes` 又占实例内存。
 `pluginsdk.MediaRef(sink.Token())`。宿主识别这个哨兵后直接使用已落盘的文件，跳过
 URL 下载与校验。失败时 `sink.Abort()` 让宿主删除半成品。
 
+密文本身也可以交给宿主下载：`Context.DownloadToScratch(url, opts)` 用宿主的多线程
+下载器把文件落到沙箱内可写的 `/scratch`，并把进度（附 `opts.Title/Album`）实时显示在
+状态消息里。该文件只在本次调用内有效，调用结束后宿主会删除。插件自己的临时文件也应
+写在 `/scratch` 下。单个媒体文件（`media.write` 累计或 `media.download`）上限 2 GiB。
+
 这样平台专属的取密钥/解密逻辑全在插件里，宿主只提供“把字节写到文件”这个中立原语，
-依然不认识任何具体平台。数据面重的插件通常要调高 `[plugins] memory_mb` 与
-`http_max_bytes`（默认 256MB / 16MB 已够 AAC 256k 单轨）。
+依然不认识任何具体平台。解密应从 `/scratch` 文件按分片流式读写（如分片 MP4 逐个
+moof+mdat 处理），实例内存只取决于单个分片大小，与音轨时长无关，默认
+`memory_mb = 128` 即可。
 
 解密往往还要一个密钥/设备文件（如 Widevine 的 `.wvd`）。插件跑在沙箱里默认没有文件
 系统访问，宿主实例化时只把 `[plugins] fs_dir` 这一个目录**只读**挂进沙箱。插件用
@@ -313,6 +349,6 @@ URL 下载与校验。失败时 `sink.Abort()` 让宿主删除半成品。
 下载前也会做 scheme 与私网检查（可用 `[plugins] allow_private_networks` 放开，仅供
 本地测试）。宿主不内置任何平台实现，默认 provider 由 `[plugins] default` 决定。
 
-`[plugins] fs_dir` 把一个目录**只读**挂进所有插件的沙箱（默认不挂，插件无文件系统
-访问）。只读挂载仍可能被相对路径 `../../` 越界读取 `fs_dir` 之上的文件，所以只在
+`[plugins] fs_dir` 把一个目录**只读**挂进所有插件的沙箱（默认不挂）。所有插件共享
+一个可写的 `/scratch` 挂载，用于单次调用内的临时文件，宿主启动时会清空它。只读挂载仍可能被相对路径 `../../` 越界读取 `fs_dir` 之上的文件，所以只在
 该目录放插件该看到的文件，不要指向家目录或仓库根。

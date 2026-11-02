@@ -31,6 +31,17 @@ func main() {
 
 	cfgPath := flag.String("c", "config.toml", "配置文件路径")
 	pluginDir := flag.String("plugins", "./plugins", "gen-config 读取插件 schema 的目录")
+	flag.Usage = func() {
+		w := flag.CommandLine.Output()
+		fmt.Fprintf(w, "Usage:\n")
+		fmt.Fprintf(w, "  %s [-c 配置文件]                  启动 bot\n", os.Args[0])
+		fmt.Fprintf(w, "  %s gen-config [-plugins 目录]     生成带注释的配置模板到 stdout\n\n", os.Args[0])
+		fmt.Fprintf(w, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(w, "\nExample:\n")
+		fmt.Fprintf(w, "  %s -c config.toml\n", os.Args[0])
+		fmt.Fprintf(w, "  %s gen-config -plugins ./plugins > config.toml\n", os.Args[0])
+	}
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

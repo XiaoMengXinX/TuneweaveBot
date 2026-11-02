@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	_ "golang.org/x/image/webp"
@@ -24,11 +26,34 @@ import (
 	"github.com/nfnt/resize"
 )
 
-// Metadata 是通用 ID3/FLAC 标签内容。
+// Metadata 是通用标签内容，按文件类型写成 ID3、FLAC Vorbis comment 或 MP4 ilst。
 type Metadata struct {
-	Title   string   `json:"title"`
-	Artists []string `json:"artists"`
-	Album   string   `json:"album"`
+	Title        string   `json:"title"`
+	Artists      []string `json:"artists"`
+	Album        string   `json:"album"`
+	AlbumArtists []string `json:"album_artists,omitempty"`
+	Date         string   `json:"date,omitempty"` // YYYY、YYYY-MM 或 YYYY-MM-DD
+	TrackNumber  int      `json:"track_number,omitempty"`
+	TrackTotal   int      `json:"track_total,omitempty"`
+	DiscNumber   int      `json:"disc_number,omitempty"`
+	DiscTotal    int      `json:"disc_total,omitempty"`
+	Composers    []string `json:"composers,omitempty"`
+	Copyright    string   `json:"copyright,omitempty"`
+	// Custom 是自定义字段（如 ISRC、label），写成 TXXX / Vorbis comment / iTunes freeform。
+	Custom map[string]string `json:"custom,omitempty"`
+}
+
+func joinNames(names []string) string { return strings.Join(names, ", ") }
+
+// position 输出 "n" 或 "n/total"。
+func position(n, total int) string {
+	if n <= 0 {
+		return ""
+	}
+	if total > 0 {
+		return fmt.Sprintf("%d/%d", n, total)
+	}
+	return strconv.Itoa(n)
 }
 
 const (
@@ -185,6 +210,8 @@ func writeMetadata(filePath, picPath string, meta Metadata) error {
 		return writeMP3(filePath, picPath, meta)
 	case strings.HasSuffix(strings.ToLower(filePath), ".flac"):
 		return writeFLAC(filePath, picPath, meta)
+	case strings.HasSuffix(strings.ToLower(filePath), ".m4a"), strings.HasSuffix(strings.ToLower(filePath), ".mp4"):
+		return writeMP4(filePath, picPath, meta)
 	default:
 		return nil
 	}
@@ -198,9 +225,23 @@ func writeMP3(filePath, picPath string, meta Metadata) error {
 	defer tag.Close()
 	tag.SetDefaultEncoding(id3v2.EncodingUTF8)
 	tag.SetTitle(meta.Title)
-	tag.SetArtist(strings.Join(meta.Artists, ", "))
-	if meta.Album != "" {
-		tag.SetAlbum(meta.Album)
+	tag.SetArtist(joinNames(meta.Artists))
+	text := func(id, value string) {
+		if value != "" {
+			tag.AddTextFrame(id, tag.DefaultEncoding(), value)
+		}
+	}
+	text("TALB", meta.Album)
+	text("TPE2", joinNames(meta.AlbumArtists))
+	text("TDRC", meta.Date)
+	text("TRCK", position(meta.TrackNumber, meta.TrackTotal))
+	text("TPOS", position(meta.DiscNumber, meta.DiscTotal))
+	text("TCOM", joinNames(meta.Composers))
+	text("TCOP", meta.Copyright)
+	for _, k := range sortedKeys(meta.Custom) {
+		if v := meta.Custom[k]; v != "" {
+			tag.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{Encoding: tag.DefaultEncoding(), Description: k, Value: v})
+		}
 	}
 	if picPath != "" {
 		artwork, err := os.ReadFile(picPath)
@@ -242,12 +283,32 @@ func writeFLAC(filePath, picPath string, meta Metadata) error {
 	}
 
 	tag := flacvorbis.New()
-	_ = tag.Add(flacvorbis.FIELD_TITLE, meta.Title)
-	if len(meta.Artists) != 0 {
-		_ = tag.Add(flacvorbis.FIELD_ARTIST, strings.Join(meta.Artists, ", "))
+	add := func(key, value string) {
+		if value != "" {
+			_ = tag.Add(key, value)
+		}
 	}
-	if meta.Album != "" {
-		_ = tag.Add(flacvorbis.FIELD_ALBUM, meta.Album)
+	add(flacvorbis.FIELD_TITLE, meta.Title)
+	add(flacvorbis.FIELD_ARTIST, joinNames(meta.Artists))
+	add(flacvorbis.FIELD_ALBUM, meta.Album)
+	add("ALBUMARTIST", joinNames(meta.AlbumArtists))
+	add(flacvorbis.FIELD_DATE, meta.Date)
+	if meta.TrackNumber > 0 {
+		add(flacvorbis.FIELD_TRACKNUMBER, strconv.Itoa(meta.TrackNumber))
+	}
+	if meta.TrackTotal > 0 {
+		add("TRACKTOTAL", strconv.Itoa(meta.TrackTotal))
+	}
+	if meta.DiscNumber > 0 {
+		add("DISCNUMBER", strconv.Itoa(meta.DiscNumber))
+	}
+	if meta.DiscTotal > 0 {
+		add("DISCTOTAL", strconv.Itoa(meta.DiscTotal))
+	}
+	add("COMPOSER", joinNames(meta.Composers))
+	add(flacvorbis.FIELD_COPYRIGHT, meta.Copyright)
+	for _, k := range sortedKeys(meta.Custom) {
+		add(strings.ToUpper(k), meta.Custom[k])
 	}
 	tagBlock := tag.Marshal()
 	replaced := false
@@ -303,6 +364,15 @@ func writeFLAC(filePath, picPath string, meta Metadata) error {
 	}
 	remove = false
 	return nil
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func imageMime(data []byte) string {

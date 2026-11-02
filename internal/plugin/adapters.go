@@ -3,6 +3,8 @@ package plugin
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"os"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/provider"
 )
@@ -15,6 +17,7 @@ type ProviderAdapter struct {
 func (a *ProviderAdapter) Name() string        { return a.plugin.manifest.Name }
 func (a *ProviderAdapter) DisplayName() string { return a.plugin.manifest.DisplayName }
 func (a *ProviderAdapter) Code() string        { return a.plugin.manifest.Code }
+func (a *ProviderAdapter) LinkHosts() []string { return a.plugin.manifest.LinkHosts }
 
 func (a *ProviderAdapter) Match(ctx context.Context, text string) (*provider.Ref, bool) {
 	var out struct {
@@ -56,6 +59,38 @@ func (a *ProviderAdapter) Resolve(ctx context.Context, ref provider.Ref) (*provi
 		return out.Track, &provider.NoAudioError{Code: out.NoAudio.Code, Fee: out.NoAudio.Fee}
 	}
 	return out.Track, nil
+}
+
+// Metadata 只取展示元数据。插件未实现 provider.metadata 时回退到 resolve，
+// 并删掉 resolve 顺带落盘的媒体文件。
+func (a *ProviderAdapter) Metadata(ctx context.Context, ref provider.Ref) (*provider.TrackSummary, error) {
+	var out struct {
+		Track *provider.TrackSummary `json:"track"`
+	}
+	err := a.plugin.call(ctx, "provider.metadata", map[string]any{"ref": ref}, &out)
+	if err == nil {
+		if out.Track == nil {
+			return nil, provider.ErrNoResult
+		}
+		return out.Track, nil
+	}
+	if !errors.Is(err, provider.ErrUnsupported) {
+		return nil, err
+	}
+
+	track, err := a.Resolve(ctx, ref)
+	if track == nil {
+		return nil, err
+	}
+	if path := a.plugin.runtime.mediaPath(track.AudioURL); path != "" {
+		_ = os.Remove(path)
+	}
+	// 无音频（VIP/无版权）不影响展示元数据
+	var noAudio *provider.NoAudioError
+	if errors.As(err, &noAudio) {
+		err = nil
+	}
+	return track.Summary(), err
 }
 
 func (a *ProviderAdapter) PageURL(ref provider.Ref) string {

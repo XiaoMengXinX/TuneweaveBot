@@ -70,11 +70,20 @@ const (
 	CacheChatTest        = "已设为缓存群，Guest Mode 点歌时会先把未缓存的歌曲上传到这里"
 	CacheChatUnreachable = "无法向该聊天发送消息，请确认 bot 已加入并可以发言"
 	CacheChatDisabled    = "已关闭缓存群"
-
-	CookieExpired          = "登录已失效，请联系 bot 管理员"
-	CookieExpiredAdminWarn = "登录已失效，新歌下载已暂停，请发送 /login 重新登录"
-	CookieResumedAdmin     = "登录已生效，新歌下载已恢复"
 )
+
+func CookieExpired(provider string) string {
+	return Escape(provider) + " 登录已失效，请联系 bot 管理员"
+}
+
+// name 为 provider 内部名，用于拼出可直接复制的 /login 命令。
+func CookieExpiredAdminWarn(display, name string) string {
+	return fmt.Sprintf("%s 登录已失效，新歌下载已暂停，请发送 <code>/login %s</code> 重新登录", Escape(display), Escape(name))
+}
+
+func CookieResumedAdmin(provider string) string {
+	return Escape(provider) + " 登录已生效，新歌下载已恢复"
+}
 
 func LoginQRCaption(remainSec int) string {
 	return fmt.Sprintf("请扫描二维码登录\n剩余有效期 %d 秒", remainSec)
@@ -102,6 +111,11 @@ func MusicStatus(name, album, ext string, sizeMB float64, suffix string) string 
 
 func DownloadStatus(speed string, writtenMB, totalMB float64, percent int64) string {
 	return fmt.Sprintf(" %s\n%.2fMB/%.2fMB %d%%", Escape(speed), writtenMB, totalMB, percent)
+}
+
+func DownloadingWithInfo(name, album, speed string, writtenMB, totalMB float64, percent int64) string {
+	return fmt.Sprintf("%s\n专辑: %s\n%s%s", Escape(name), Escape(album), Downloading,
+		DownloadStatus(speed, writtenMB, totalMB, percent))
 }
 
 func SongInfo(name, artists, album string) string {

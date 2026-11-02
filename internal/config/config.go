@@ -101,6 +101,8 @@ type PluginsConfig struct {
 	FSDir                string   `toml:"fs_dir"`
 	// Config 保存每个插件的独立配置段 [plugins.<name>]，直接传给对应插件。
 	Config map[string]map[string]any `toml:"-"`
+	// PluginInstances 来自 [plugins.<name>] instances，覆盖全局 instances。
+	PluginInstances map[string]int `toml:"-"`
 }
 
 // pluginsHostKeys 是 [plugins] 段中宿主自身的字段名；其余子表都视为插件配置段。
@@ -143,9 +145,9 @@ func Default() *Config {
 		},
 		Plugins: PluginsConfig{
 			Dir:          "./plugins",
-			Instances:    1,
+			Instances:    2,
 			CallTimeout:  Duration(30 * time.Second),
-			MemoryMB:     256,
+			MemoryMB:     128,
 			HTTPMaxBytes: 16 << 20,
 		},
 		Database: DatabaseConfig{
@@ -182,6 +184,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("解析 %s 失败: %w", path, err)
 	}
 	cfg.Plugins.Config = sections
+	if cfg.Plugins.PluginInstances, err = splitPluginInstances(sections); err != nil {
+		return nil, err
+	}
 	if err := applyEnv(cfg); err != nil {
 		return nil, err
 	}
@@ -223,6 +228,24 @@ func extractPluginSections(data []byte) ([]byte, map[string]map[string]any, erro
 		return nil, nil, err
 	}
 	return stripped, sections, nil
+}
+
+// splitPluginInstances 取出各插件段中由宿主解释的 instances，不再传给插件。
+func splitPluginInstances(sections map[string]map[string]any) (map[string]int, error) {
+	out := make(map[string]int)
+	for name, section := range sections {
+		raw, ok := section["instances"]
+		if !ok {
+			continue
+		}
+		n, ok := raw.(int64)
+		if !ok || n <= 0 {
+			return nil, fmt.Errorf("配置项 [plugins.%s] instances 必须为正整数", name)
+		}
+		out[name] = int(n)
+		delete(section, "instances")
+	}
+	return out, nil
 }
 
 // setPluginValue 写入 [plugins.<name>] 的某个键，必要时创建段。

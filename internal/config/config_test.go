@@ -471,11 +471,18 @@ allow_private_networks = true
 [plugins.netease]
 music_u = "COOKIE"
 level = "lossless"
+instances = 2
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := cfg.Plugins
+	if p.PluginInstances["netease"] != 2 {
+		t.Errorf("netease instances = %d, want 2", p.PluginInstances["netease"])
+	}
+	if _, ok := p.Config["netease"]["instances"]; ok {
+		t.Error("instances 是宿主键，不应传给插件")
+	}
 	if p.Dir != "./myplugins" || p.Default != "netease" || p.Instances != 3 || p.MemoryMB != 256 {
 		t.Errorf("plugins = %+v", p)
 	}
@@ -490,6 +497,14 @@ level = "lossless"
 	}
 	if got := p.Config["netease"]["music_u"]; got != "COOKIE" {
 		t.Errorf("netease music_u = %v, want COOKIE", got)
+	}
+}
+
+func TestPluginInstancesInvalid(t *testing.T) {
+	for _, value := range []string{"0", "-1", `"2"`} {
+		if _, err := Load(writeTemp(t, validTOML+"\n[plugins.netease]\ninstances = "+value+"\n")); err == nil {
+			t.Errorf("instances = %s 应被拒绝", value)
+		}
 	}
 }
 

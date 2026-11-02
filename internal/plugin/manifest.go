@@ -23,6 +23,7 @@ type Manifest struct {
 	Commands         []Command     `json:"commands"`
 	Resources        Resources     `json:"resources"`
 	HTTPAllowedHosts []string      `json:"http_allowed_hosts"`
+	LinkHosts        []string      `json:"link_hosts,omitempty"` // provider.match 能识别的链接域名，供宿主预筛
 	ConfigSchema     []ConfigField `json:"config_schema,omitempty"`
 }
 

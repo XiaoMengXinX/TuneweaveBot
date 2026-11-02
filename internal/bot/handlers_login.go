@@ -110,7 +110,10 @@ func (a *App) runQRLogin(ctx context.Context, auth provider.Authenticator, m *mo
 	a.addLoginSurface(m.Chat.ID, photo.ID)
 
 	editCaption := func(text string, markup models.ReplyMarkup) error {
-		_, err := a.tg.EditMessageCaption(ctx, &tgb.EditMessageCaptionParams{
+		// 终态提示即便会话已被取消/过期也要送达，用剥离取消信号的 ctx
+		editCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_, err := a.tg.EditMessageCaption(editCtx, &tgb.EditMessageCaptionParams{
 			ChatID:      m.Chat.ID,
 			MessageID:   photo.ID,
 			Caption:     text,
@@ -139,7 +142,10 @@ func (a *App) runTokenLogin(ctx context.Context, auth provider.Authenticator, m 
 
 	token, ok := a.waitToken(ctx, m.Chat.ID, prompt.ID)
 	edit := func(text string) {
-		if _, err := a.tg.EditMessageText(ctx, &tgb.EditMessageTextParams{
+		// 终态提示即便会话已被取消/过期也要送达，用剥离取消信号的 ctx
+		editCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if _, err := a.tg.EditMessageText(editCtx, &tgb.EditMessageTextParams{
 			ChatID:      m.Chat.ID,
 			MessageID:   prompt.ID,
 			Text:        text,
@@ -235,13 +241,26 @@ func (a *App) handleCallbackCancelLogin(ctx context.Context, tg *tgb.Bot, update
 	if !a.cancelLoginSession(chatID, messageID) {
 		// 不属于当前会话（旧消息/会话已结束）：只移除按钮，不影响进行中的会话
 		if msg != nil {
-			if _, err := a.tg.EditMessageCaption(ctx, &tgb.EditMessageCaptionParams{
-				ChatID:      msg.Chat.ID,
-				MessageID:   msg.ID,
-				Caption:     render.LoginSessionOver,
-				ParseMode:   models.ParseModeHTML,
-				ReplyMarkup: emptyKeyboard(),
-			}); err != nil {
+			// 二维码登录是带 caption 的图片，token 登录是纯文本，需用对应的编辑接口
+			var err error
+			if len(msg.Photo) > 0 {
+				_, err = a.tg.EditMessageCaption(ctx, &tgb.EditMessageCaptionParams{
+					ChatID:      msg.Chat.ID,
+					MessageID:   msg.ID,
+					Caption:     render.LoginSessionOver,
+					ParseMode:   models.ParseModeHTML,
+					ReplyMarkup: emptyKeyboard(),
+				})
+			} else {
+				_, err = a.tg.EditMessageText(ctx, &tgb.EditMessageTextParams{
+					ChatID:      msg.Chat.ID,
+					MessageID:   msg.ID,
+					Text:        render.LoginSessionOver,
+					ParseMode:   models.ParseModeHTML,
+					ReplyMarkup: emptyKeyboard(),
+				})
+			}
+			if err != nil {
 				a.log.Errorln(err)
 			}
 		}

@@ -23,6 +23,8 @@ type Config struct {
 	Default string
 	Runtime RuntimeConfig
 	Configs map[string]json.RawMessage
+	// Instances 是按插件名覆盖的实例数，未设置的插件使用 Runtime.Instances
+	Instances map[string]int
 }
 
 // Manager 管理已加载的插件并提供 provider/auth/recognizer 适配器。
@@ -68,7 +70,11 @@ func (m *Manager) load(ctx context.Context, cfg Config) error {
 		if len(pluginCfg) == 0 {
 			pluginCfg = json.RawMessage(`{}`)
 		}
-		p, err := m.runtime.loadPlugin(ctx, path, pluginCfg)
+		instances := cfg.Instances[name]
+		if instances <= 0 {
+			instances = m.runtime.cfg.Instances
+		}
+		p, err := m.runtime.loadPlugin(ctx, path, pluginCfg, instances)
 		if err != nil {
 			return fmt.Errorf("加载插件 %s 失败: %w", name, err)
 		}
@@ -78,6 +84,7 @@ func (m *Manager) load(ctx context.Context, cfg Config) error {
 		}
 		m.plugins[p.manifest.Name] = p
 		m.order = append(m.order, p.manifest.Name)
+		m.runtime.log.Printf("已加载插件 %s v%s [%s] x%d", p.manifest.Name, p.manifest.Version, strings.Join(p.manifest.Capabilities, ", "), cap(p.pool))
 	}
 	if len(m.order) == 0 {
 		return fmt.Errorf("插件目录 %s 中没有可加载的 .wasm 插件", cfg.Dir)
@@ -153,11 +160,18 @@ const MediaRefPrefix = "plugin-media:"
 // MediaPath 把 media 哨兵（plugin-media:<token>）解析为已落盘的文件路径。
 // token 不合法或文件不存在时返回空串。
 func (m *Manager) MediaPath(audioURL string) string {
+	if m == nil {
+		return ""
+	}
+	return m.runtime.mediaPath(audioURL)
+}
+
+func (r *Runtime) mediaPath(audioURL string) string {
 	token, ok := strings.CutPrefix(audioURL, MediaRefPrefix)
 	if !ok || !isMediaToken(token) {
 		return ""
 	}
-	matches, _ := filepath.Glob(filepath.Join(m.runtime.cfg.MediaDir, "*-"+token+".*"))
+	matches, _ := filepath.Glob(filepath.Join(r.cfg.MediaDir, "*-"+token+".*"))
 	if len(matches) == 0 {
 		return ""
 	}

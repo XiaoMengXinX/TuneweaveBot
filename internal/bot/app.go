@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -90,7 +91,7 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 
 	log.AddHook(expectedErrorHook{})
 
-	plugins, err := plugin.Load(runCtx, pluginConfig(cfg), st, log, client)
+	plugins, err := plugin.Load(runCtx, pluginConfig(cfg, cacheDir), st, log, client)
 	if err != nil {
 		return false, err
 	}
@@ -258,7 +259,7 @@ func commandArguments(m *models.Message) string {
 }
 
 // pluginConfig 把 [plugins] 与各 [plugins.<name>] 段转换为插件加载配置。
-func pluginConfig(cfg *config.Config) plugin.Config {
+func pluginConfig(cfg *config.Config, cacheDir string) plugin.Config {
 	configs := make(map[string]json.RawMessage, len(cfg.Plugins.Config))
 	for name, values := range cfg.Plugins.Config {
 		if raw, err := json.Marshal(values); err == nil {
@@ -275,9 +276,13 @@ func pluginConfig(cfg *config.Config) plugin.Config {
 			HTTPMaxBytes:         cfg.Plugins.HTTPMaxBytes,
 			AllowPrivateNetworks: cfg.Plugins.AllowPrivateNetworks,
 			Instances:            cfg.Plugins.Instances,
+			MaxTasks:             cfg.Download.Concurrency,
 			FSDir:                cfg.Plugins.FSDir,
+			MediaDir:             filepath.Join(cacheDir, "plugin-media"),
+			ScratchDir:           filepath.Join(cacheDir, "plugin-scratch"),
 		},
-		Configs: configs,
+		Configs:   configs,
+		Instances: cfg.Plugins.PluginInstances,
 	}
 }
 
@@ -298,4 +303,12 @@ func (a *App) checkCredentials(ctx context.Context) {
 			a.pauseDownloads(ctx, name)
 		}
 	}
+}
+
+// providerDisplay 把 provider 名解析为用户可读的显示名，未注册时回退到原名。
+func (a *App) providerDisplay(name string) string {
+	if p, ok := a.providers.Get(name); ok {
+		return p.DisplayName()
+	}
+	return name
 }

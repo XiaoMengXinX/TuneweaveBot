@@ -19,7 +19,9 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"golang.org/x/sync/semaphore"
 
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/fetch"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
 )
 
@@ -28,26 +30,36 @@ type RuntimeConfig struct {
 	MemoryMB             int
 	HTTPMaxBytes         int64
 	AllowPrivateNetworks bool
-	Instances            int
+	Instances            int    // 常驻实例池大小，只处理轻量调用
+	MaxTasks             int    // 全局同时进行的重任务（heavyActions）上限
 	MediaDir             string // 插件经 media.* 写入的音频落盘目录
 	FSDir                string // 只读挂进沙箱的宿主目录（插件按相对路径读，如 .wvd 设备）
+	ScratchDir           string // 可写挂进沙箱 ScratchMount 的宿主目录
 }
+
+const ScratchMount = "/scratch"
 
 func (c RuntimeConfig) withDefaults() RuntimeConfig {
 	if c.CallTimeout <= 0 {
 		c.CallTimeout = 30 * time.Second
 	}
 	if c.MemoryMB <= 0 {
-		c.MemoryMB = 256
+		c.MemoryMB = 128
 	}
 	if c.HTTPMaxBytes <= 0 {
 		c.HTTPMaxBytes = 16 << 20
 	}
 	if c.Instances <= 0 {
-		c.Instances = 1
+		c.Instances = 2
+	}
+	if c.MaxTasks <= 0 {
+		c.MaxTasks = 4
 	}
 	if c.MediaDir == "" {
 		c.MediaDir = filepath.Join(os.TempDir(), "tuneweave-media")
+	}
+	if c.ScratchDir == "" {
+		c.ScratchDir = filepath.Join(os.TempDir(), "tuneweave-scratch")
 	}
 	return c
 }
@@ -59,7 +71,9 @@ type Runtime struct {
 	store      *store.Store
 	log        *logrus.Logger
 	httpClient *http.Client
+	downloader *fetch.Downloader // media.download 用，落盘到 ScratchDir
 	seq        atomic.Uint64
+	tasks      *semaphore.Weighted // 限制重任务的临时实例数
 }
 
 func NewRuntime(ctx context.Context, cfg RuntimeConfig, st *store.Store, log *logrus.Logger, httpClient *http.Client) (*Runtime, error) {
@@ -68,6 +82,12 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig, st *store.Store, log *lo
 		if info, err := os.Stat(cfg.FSDir); err != nil || !info.IsDir() {
 			log.Warnf("插件只读挂载目录 %q 不存在或不是目录，已禁用插件文件系统访问", cfg.FSDir)
 			cfg.FSDir = ""
+		}
+	}
+	// 两个目录只存放单次调用内的临时文件，启动时残留的都来自上次异常退出
+	for _, dir := range []string{cfg.ScratchDir, cfg.MediaDir} {
+		if err := resetDir(dir); err != nil {
+			return nil, fmt.Errorf("重置插件临时目录 %q 失败: %w", dir, err)
 		}
 	}
 	rtCfg := wazero.NewRuntimeConfig().
@@ -84,6 +104,8 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig, st *store.Store, log *lo
 		store:      st,
 		log:        log,
 		httpClient: pluginHTTPClient(httpClient, cfg.AllowPrivateNetworks),
+		downloader: fetch.New(cfg.ScratchDir, cfg.CallTimeout, 1),
+		tasks:      semaphore.NewWeighted(int64(cfg.MaxTasks)),
 	}
 	if _, err := rt.NewHostModuleBuilder("host").
 		NewFunctionBuilder().
@@ -132,10 +154,33 @@ type instance struct {
 }
 
 // discard 永久丢弃一个实例：清掉未完成的媒体写入、关闭模块、移除状态。
+// 超时/崩溃的实例来不及删除自己在 scratch 下建的临时文件，这里顺带清理过期文件；
+// 任何调用都不会超过 CallTimeout，早于两倍超时的文件必然已无人使用。
 func (r *Runtime) discard(ctx context.Context, inst *instance) {
 	inst.state.closeMedia()
 	_ = inst.module.Close(ctx)
 	r.states.Delete(inst.name)
+	sweepStale(r.cfg.ScratchDir, 2*r.cfg.CallTimeout)
+}
+
+func resetDir(dir string) error {
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	return os.MkdirAll(dir, 0o755)
+}
+
+func sweepStale(dir string, olderThan time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-olderThan)
+	for _, entry := range entries {
+		if info, err := entry.Info(); err == nil && info.ModTime().Before(cutoff) {
+			_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
+		}
+	}
 }
 
 func (i *instance) call(ctx context.Context, action string, payload, out any) error {
@@ -156,6 +201,7 @@ func (i *instance) call(ctx context.Context, action string, payload, out any) er
 	if len(input) > 1<<24 {
 		return fmt.Errorf("插件调用输入过大")
 	}
+	defer i.state.releaseDownloads()
 
 	results, err := alloc.Call(ctx, uint64(len(input)))
 	if err != nil {
@@ -232,7 +278,7 @@ func (p *Plugin) setCred(credential string) {
 	p.credMu.Unlock()
 }
 
-func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.RawMessage) (*Plugin, error) {
+func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.RawMessage, instances int) (*Plugin, error) {
 	wasm, err := os.ReadFile(wasmPath)
 	if err != nil {
 		return nil, err
@@ -275,7 +321,7 @@ func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.R
 		return nil, err
 	}
 
-	count := instanceCount(r.cfg.Instances, manifest.Resources.Instances)
+	count := instanceCount(instances, manifest.Resources.Instances)
 	p.pool = make(chan *instance, count)
 	p.pool <- probe
 	for i := 1; i < count; i++ {
@@ -322,14 +368,19 @@ func (r *Runtime) instantiate(ctx context.Context, p *Plugin, pluginName string,
 		log:          r.log,
 		mediaCapable: p.mediaCapable,
 		mediaDir:     r.cfg.MediaDir,
+		scratchDir:   r.cfg.ScratchDir,
+		downloader:   r.downloader,
+		allowPrivate: r.cfg.AllowPrivateNetworks,
 	}
 	r.states.Store(name, state)
 	modCfg := wazero.NewModuleConfig().
 		WithName(name).
 		WithStartFunctions("_initialize")
+	fsCfg := wazero.NewFSConfig().WithDirMount(r.cfg.ScratchDir, ScratchMount)
 	if r.cfg.FSDir != "" {
-		modCfg = modCfg.WithFSConfig(wazero.NewFSConfig().WithReadOnlyDirMount(r.cfg.FSDir, "/"))
+		fsCfg = fsCfg.WithReadOnlyDirMount(r.cfg.FSDir, "/")
 	}
+	modCfg = modCfg.WithFSConfig(fsCfg)
 	module, err := r.rt.InstantiateModule(ctx, p.compiled, modCfg)
 	if err != nil {
 		r.states.Delete(name)
@@ -375,6 +426,9 @@ func (p *Plugin) release(inst *instance) {
 
 // call 执行一次插件动作，超时/崩溃的实例会被替换。
 func (p *Plugin) call(ctx context.Context, action string, payload, out any) error {
+	if heavyActions[action] {
+		return p.callFresh(ctx, action, payload, out)
+	}
 	callCtx, cancel := context.WithTimeout(ctx, p.runtime.cfg.CallTimeout)
 	defer cancel()
 
@@ -395,6 +449,38 @@ func (p *Plugin) call(ctx context.Context, action string, payload, out any) erro
 	// 超时、trap 或内存错误：丢弃实例并补一个
 	p.runtime.discard(context.Background(), inst)
 	p.replace(ctx)
+	return err
+}
+
+// heavyActions 是耗时长、内存峰值高的动作，在临时实例中执行。
+var heavyActions = map[string]bool{
+	"provider.resolve":     true,
+	"recognizer.recognize": true,
+}
+
+// callFresh 在临时实例中执行重任务，结束即销毁。这样常驻池不会被下载占满，
+// 搜索等轻量调用无需排队；wasm 内存只增不减，销毁实例也是归还峰值内存的唯一方式。
+func (p *Plugin) callFresh(ctx context.Context, action string, payload, out any) error {
+	r := p.runtime
+	if err := r.tasks.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer r.tasks.Release(1)
+
+	callCtx, cancel := context.WithTimeout(ctx, r.cfg.CallTimeout)
+	defer cancel()
+	inst, err := r.instantiate(callCtx, p, p.manifest.Name, p.allowedHosts)
+	if err != nil {
+		return err
+	}
+	defer r.discard(context.Background(), inst)
+	if err := r.initInstance(callCtx, inst, p.cred()); err != nil {
+		return err
+	}
+	err = inst.call(callCtx, action, payload, out)
+	if pe, ok := errors.AsType[*pluginError](err); ok {
+		return mapError(pe)
+	}
 	return err
 }
 

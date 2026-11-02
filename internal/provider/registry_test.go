@@ -205,3 +205,41 @@ func TestRegistryDelegates(t *testing.T) {
 		t.Errorf("Lyrics 未知 provider 应返回 ErrNotFound, got %v", err)
 	}
 }
+
+// hostsProvider 额外声明 LinkHosts。
+type hostsProvider struct {
+	*fakeProvider
+	hosts []string
+}
+
+func (f *hostsProvider) LinkHosts() []string { return f.hosts }
+
+func TestMatchSkipsProvidersByLinkHosts(t *testing.T) {
+	ne := &hostsProvider{fakeProvider: &fakeProvider{name: "netease", prefix: "https://music.163.com/song?id="}, hosts: []string{"music.163.com"}}
+	sp := &hostsProvider{fakeProvider: &fakeProvider{name: "spotify", prefix: "https://open.spotify.com/track/"}, hosts: []string{"open.spotify.com"}}
+	plain := &fakeProvider{name: "plain", prefix: "plain:"}
+	r, err := NewRegistry("netease", ne, sp, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref, _, ok := r.Match(context.Background(), "https://open.spotify.com/track/abc")
+	if !ok || ref.Provider != "spotify" {
+		t.Fatalf("spotify link matched %+v, %v", ref, ok)
+	}
+	if ne.matchCall != 0 {
+		t.Errorf("netease Match called %d times for a spotify link", ne.matchCall)
+	}
+
+	// 未声明域名的 provider 总会被调用；与任何域名都不符的链接跳过声明了域名的 provider
+	r.Match(context.Background(), "https://example.com/x")
+	if ne.matchCall != 0 || sp.matchCall != 1 || plain.matchCall != 1 {
+		t.Errorf("match calls ne=%d sp=%d plain=%d", ne.matchCall, sp.matchCall, plain.matchCall)
+	}
+
+	// 不像链接的文本（纯 ID）不预筛
+	r.Match(context.Background(), "12345")
+	if ne.matchCall != 1 || sp.matchCall != 2 {
+		t.Errorf("plain id: match calls ne=%d sp=%d", ne.matchCall, sp.matchCall)
+	}
+}

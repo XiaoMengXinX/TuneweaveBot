@@ -80,6 +80,9 @@ func (r *Registry) Match(ctx context.Context, text string) (*Ref, Provider, bool
 	}
 	for _, name := range order {
 		p := r.providers[name]
+		if !mayMatch(p, text) {
+			continue
+		}
 		ref, ok := p.Match(ctx, text)
 		if !ok || ref == nil {
 			continue
@@ -93,7 +96,7 @@ func (r *Registry) Match(ctx context.Context, text string) (*Ref, Provider, bool
 // MatchProvider 只在指定 provider 上匹配。
 func (r *Registry) MatchProvider(ctx context.Context, name, text string) (*Ref, bool) {
 	p, ok := r.providers[name]
-	if !ok {
+	if !ok || !mayMatch(p, text) {
 		return nil, false
 	}
 	ref, ok := p.Match(ctx, text)
@@ -102,6 +105,26 @@ func (r *Registry) MatchProvider(ctx context.Context, name, text string) (*Ref, 
 	}
 	ref.Provider = name
 	return ref, true
+}
+
+// mayMatch 用 LinkHosts 在本地预筛，避免为不相关的链接占用插件实例。
+// 不像链接的文本（纯 ID、URI）不预筛。
+func mayMatch(p Provider, text string) bool {
+	lp, ok := p.(LinkHostsProvider)
+	if !ok || !LooksLikeLink(text) {
+		return true
+	}
+	hosts := lp.LinkHosts()
+	if len(hosts) == 0 {
+		return true
+	}
+	text = strings.ToLower(text)
+	for _, host := range hosts {
+		if strings.Contains(text, strings.ToLower(host)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Registry) matchExplicit(text string) (*Ref, Provider, bool) {
@@ -179,13 +202,7 @@ func (r *Registry) Metadata(ctx context.Context, ref Ref) (*TrackSummary, error)
 	if errors.As(err, &noAudio) {
 		err = nil
 	}
-	return &TrackSummary{
-		Ref:        track.Ref,
-		Title:      track.Title,
-		Artists:    track.Artists,
-		Album:      track.Album,
-		DurationMS: track.DurationMS,
-	}, err
+	return track.Summary(), err
 }
 
 func (r *Registry) Search(ctx context.Context, name, keyword string, limit, offset int) ([]TrackSummary, int, error) {

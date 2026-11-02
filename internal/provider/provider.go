@@ -49,6 +49,12 @@ type ShareURLProvider interface {
 	ShareURL(ref Ref) string
 }
 
+// LinkHostsProvider 是可选能力：声明 Match 能识别的链接域名。文本像链接却不含
+// 其中任何一个域名时，Registry 跳过该 provider 的 Match。
+type LinkHostsProvider interface {
+	LinkHosts() []string
+}
+
 // MetadataProvider 是可选能力：只获取展示所需元数据，不解析下载地址。
 // 未实现的 provider 由 Registry 回退到 Resolve。
 type MetadataProvider interface {

@@ -55,6 +55,16 @@ type TrackSummary struct {
 	DurationMS int      `json:"duration_ms"`
 }
 
+func (t *Track) Summary() *TrackSummary {
+	return &TrackSummary{
+		Ref:        t.Ref,
+		Title:      t.Title,
+		Artists:    t.Artists,
+		Album:      t.Album,
+		DurationMS: t.DurationMS,
+	}
+}
+
 // Lyric 是一次歌词查询返回的歌词与文件名所需元数据。
 type Lyric struct {
 	LRC     string   `json:"lrc"`

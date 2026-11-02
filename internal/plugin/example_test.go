@@ -70,6 +70,12 @@ func TestExamplePlugin(t *testing.T) {
 	if track.Title != "示例歌曲 42" || track.AudioURL != "https://example.com/audio/42.mp3" || track.ProviderName != "示例音乐" {
 		t.Errorf("track = %+v", track)
 	}
+	// resolve 在临时实例中执行，结束后只剩常驻池
+	live := 0
+	m.runtime.states.Range(func(any, any) bool { live++; return true })
+	if pool := cap(m.plugins["example"].pool); live != pool {
+		t.Errorf("live instances = %d, want pool size %d", live, pool)
+	}
 	items, total, err := m.Providers().Search(context.Background(), "example", "demo", 3, 0)
 	if err != nil || total != 42 || len(items) != 3 || items[0].ID != "1" {
 		t.Fatalf("search = %+v, %d, %v", items, total, err)
