@@ -19,7 +19,7 @@ var (
 	reg4   = regexp.MustCompile("&(.*)")
 	reg5   = regexp.MustCompile("/(.*)")
 	regInt = regexp.MustCompile(`\d+`)
-	regURL = regexp.MustCompile("(http|https)://[\\w\\-_]+(\\.[\\w\\-_]+)+([\\w\\-.,@?^=%&:/~+#]*[\\w\\-@?^=%&/~+#])?")
+	regURL = regexp.MustCompile(`(http|https)://[\w\-]+(\.[\w\-]+)+([\w\-.,@?^=%&:/~+#]*[\w\-@?^=%&/~+#])?`)
 )
 
 func containsMusicLink(text string) bool {
