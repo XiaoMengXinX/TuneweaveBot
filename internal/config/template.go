@@ -27,7 +27,7 @@ func GenerateTemplate(schemas []plugin.PluginConfigSchema) []byte {
 	b.WriteString("debug = false                           # 在终端输出 SDK 调试日志，[log] level 为 debug 时同时写入日志文件\n\n")
 
 	b.WriteString("[plugins]\n")
-	fmt.Fprintf(&b, "dir = %s                   # .wasm 插件目录，构建后由 build-plugins.sh 复制到这里\n", strconv.Quote(d.Plugins.Dir))
+	fmt.Fprintf(&b, "dir = %s                   # .wasm 插件目录；构建产物在 dist/plugins\n", strconv.Quote(d.Plugins.Dir))
 	b.WriteString("enabled = []                            # 要加载的插件名（文件名去掉 .wasm）；留空 = 加载目录下全部\n")
 	b.WriteString("default = \"\"                             # 默认 provider，/music、/search、/login 未指定时使用\n")
 	fmt.Fprintf(&b, "instances = %d                           # 每个插件常驻的实例数，处理搜索/匹配等轻量调用；可在 [plugins.<name>] 中用 instances 单独覆盖\n", d.Plugins.Instances)

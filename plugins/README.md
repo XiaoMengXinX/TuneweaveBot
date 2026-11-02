@@ -25,7 +25,7 @@ cp -r plugins/example plugins/foo        # 复制最小示例
 4. 构建并验证：
 
 ```sh
-PLUGINS="foo" bash build-plugins.sh
+NAME=foo bash build-plugins.sh && cp dist/plugins/foo.wasm plugins/
 # config.toml 里 [plugins] enabled = ["foo"]，然后 /music foo <ID>
 # （match + resolve 即可点歌；实现 provider.search 后可用 /search foo <关键词>）
 ```
@@ -54,10 +54,12 @@ plugins/*.wasm        运行时加载目录（不进版本库）
 ```
 
 ```sh
-bash build-plugins.sh                      # 构建全部（默认 netease）
-PLUGINS="example foo" bash build-plugins.sh # 指定若干插件
-NO_COPY=1 bash build-plugins.sh            # 只输出到 dist/plugins，不复制到 plugins/
+bash build-plugins.sh              # 构建 netease 到 dist/plugins
+NAME=example bash build-plugins.sh # 构建其他插件
 ```
+
+脚本同时生成 `dist/plugins/version.json`（版本取自插件 `main.go` 的 `pluginVersion`），
+并把 commit 与构建时间注入 manifest。
 
 底层命令：
 

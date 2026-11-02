@@ -12,7 +12,7 @@ cache_chat = 0                                # 缓存群 ID，Guest Mode 点歌
 debug = false                                 # 在终端输出 SDK 调试日志，[log] level 为 debug 时同时写入日志文件
 
 [plugins]
-dir = "./plugins"                # .wasm 插件目录，构建后由 build-plugins.sh 复制到这里
+dir = "./plugins"                # .wasm 插件目录；构建产物在 dist/plugins
 enabled = []                     # 要加载的插件名（文件名去掉 .wasm）；留空 = 加载目录下全部
 default = "netease"              # 默认 provider，/music、/search、/login 未指定时使用
 instances = 2                    # 每个插件常驻的实例数，处理搜索/匹配等轻量调用；可在 [plugins.<name>] 中用 instances 单独覆盖

@@ -40,13 +40,16 @@ GOOS=windows GOARCH=amd64 bash build.sh
 ```
 
 `build.sh` 会同时构建主程序和 WASM 插件：主程序为 `TuneweaveBot`，插件产物在
-`dist/plugins/*.wasm`，并复制一份到运行时的 `plugins/` 目录。也可单独构建插件：
+`dist/plugins/*.wasm`；运行前把插件放进 `[plugins] dir`（默认 `./plugins`），或把它指向
+`dist/plugins`。也可单独构建插件：
 
 ```sh
-bash build-plugins.sh              # 全部插件
-PLUGINS="netease" bash build-plugins.sh
-NO_COPY=1 bash build-plugins.sh    # 只输出到 dist/plugins
+bash build-plugins.sh              # netease
+NAME=example bash build-plugins.sh # 其他插件
 ```
+
+预编译的 netease 插件发布在 [plugin](https://github.com/XiaoMengXinX/TuneweaveBot/releases/tag/plugin)
+release（随 master 自动更新，附带记录版本、构建时间与 commit 的 `version.json`）。
 
 插件目录为空或默认 provider 缺失时 bot 会拒绝启动，请先构建插件。
 

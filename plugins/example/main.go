@@ -1,6 +1,6 @@
 // 示例 provider 插件：演示最小可用的 WASM 插件结构，返回固定数据。
 //
-// 构建：bash build-plugins.sh（PLUGINS="example"）
+// 构建：NAME=example bash build-plugins.sh
 // 配置：
 //
 //	[plugins]

@@ -6,8 +6,10 @@ auth（登录）三类能力。
 ## 构建
 
 ```sh
-PLUGINS="netease" bash build-plugins.sh   # 默认即构建 netease
+bash build-plugins.sh   # 输出 dist/plugins/netease.wasm 与 version.json
 ```
+
+也可直接下载 [plugin](https://github.com/XiaoMengXinX/TuneweaveBot/releases/tag/plugin) release 中的预编译版本。
 
 然后在 `config.toml` 的 `[plugins] enabled` 里加上 `netease`（留空则加载目录下全部）。
 
