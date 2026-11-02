@@ -31,6 +31,10 @@ type instanceState struct {
 	httpClient   *http.Client
 	log          *logrus.Logger
 
+	mediaCapable bool                  // manifest 是否声明 "media" 能力
+	mediaDir     string                // 媒体文件落盘目录
+	mediaSinks   map[string]*mediaSink // token -> 打开的写入会话
+
 	// pending 暂存一次因缓冲区不足未能写回的响应，等待插件扩容后用 host.take 取走。
 	// 每个实例同一时刻只有一个在途 host.call，无需加锁。
 	pending []byte
@@ -196,6 +200,9 @@ func (s *instanceState) dispatch(ctx context.Context, name string, req []byte) (
 			return nil, err
 		}
 		return okResponse(map[string]any{"data": buf})
+
+	case "media.open", "media.write", "media.close", "media.abort":
+		return s.dispatchMedia(name, req)
 
 	default:
 		return nil, fmt.Errorf("unknown host call %q", name)

@@ -75,7 +75,7 @@ func (m *Manifest) validate() error {
 	}
 	for _, cap := range m.Capabilities {
 		switch cap {
-		case "provider", "recognizer", "auth":
+		case "provider", "recognizer", "auth", "media":
 		default:
 			return fmt.Errorf("插件 %s 声明了未知能力 %q", m.Name, cap)
 		}

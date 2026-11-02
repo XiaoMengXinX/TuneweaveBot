@@ -29,6 +29,7 @@ type RuntimeConfig struct {
 	HTTPMaxBytes         int64
 	AllowPrivateNetworks bool
 	Instances            int
+	MediaDir             string // 插件经 media.* 写入的音频落盘目录
 }
 
 func (c RuntimeConfig) withDefaults() RuntimeConfig {
@@ -36,13 +37,16 @@ func (c RuntimeConfig) withDefaults() RuntimeConfig {
 		c.CallTimeout = 30 * time.Second
 	}
 	if c.MemoryMB <= 0 {
-		c.MemoryMB = 128
+		c.MemoryMB = 256
 	}
 	if c.HTTPMaxBytes <= 0 {
-		c.HTTPMaxBytes = 8 << 20
+		c.HTTPMaxBytes = 16 << 20
 	}
 	if c.Instances <= 0 {
 		c.Instances = 1
+	}
+	if c.MediaDir == "" {
+		c.MediaDir = filepath.Join(os.TempDir(), "tuneweave-media")
 	}
 	return c
 }
@@ -120,6 +124,13 @@ type instance struct {
 	name   string
 }
 
+// discard 永久丢弃一个实例：清掉未完成的媒体写入、关闭模块、移除状态。
+func (r *Runtime) discard(ctx context.Context, inst *instance) {
+	inst.state.closeMedia()
+	_ = inst.module.Close(ctx)
+	r.states.Delete(inst.name)
+}
+
 func (i *instance) call(ctx context.Context, action string, payload, out any) error {
 	payloadRaw, err := json.Marshal(payload)
 	if err != nil {
@@ -193,6 +204,7 @@ type Plugin struct {
 	compiled     wazero.CompiledModule
 	config       json.RawMessage
 	allowedHosts []string
+	mediaCapable bool
 	pool         chan *instance
 	closed       atomic.Bool
 
@@ -234,25 +246,24 @@ func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.R
 	}
 	var manifest Manifest
 	if err := probe.call(probeCtx, "manifest", struct{}{}, &manifest); err != nil {
-		_ = probe.module.Close(ctx)
-		r.states.Delete(probe.name)
+		r.discard(ctx, probe)
 		_ = compiled.Close(ctx)
 		return nil, fmt.Errorf("读取插件 manifest 失败: %w", err)
 	}
 	if err := manifest.validate(); err != nil {
-		_ = probe.module.Close(ctx)
-		r.states.Delete(probe.name)
+		r.discard(ctx, probe)
 		_ = compiled.Close(ctx)
 		return nil, err
 	}
 	p.manifest = manifest
 	p.allowedHosts = manifest.HTTPAllowedHosts
+	p.mediaCapable = manifest.has("media")
 	probe.state.plugin = manifest.Name
 	probe.state.allowedHosts = p.allowedHosts
+	probe.state.mediaCapable = p.mediaCapable
 
 	if err := r.initInstance(ctx, probe, ""); err != nil {
-		_ = probe.module.Close(ctx)
-		r.states.Delete(probe.name)
+		r.discard(ctx, probe)
 		_ = compiled.Close(ctx)
 		return nil, err
 	}
@@ -267,8 +278,7 @@ func (r *Runtime) loadPlugin(ctx context.Context, wasmPath string, config json.R
 			return nil, err
 		}
 		if err := r.initInstance(ctx, inst, ""); err != nil {
-			_ = inst.module.Close(ctx)
-			r.states.Delete(inst.name)
+			r.discard(ctx, inst)
 			p.Close(ctx)
 			return nil, err
 		}
@@ -303,6 +313,8 @@ func (r *Runtime) instantiate(ctx context.Context, p *Plugin, pluginName string,
 		maxHTTPBytes: r.cfg.HTTPMaxBytes,
 		httpClient:   r.httpClient,
 		log:          r.log,
+		mediaCapable: p.mediaCapable,
+		mediaDir:     r.cfg.MediaDir,
 	}
 	r.states.Store(name, state)
 	module, err := r.rt.InstantiateModule(ctx, p.compiled, wazero.NewModuleConfig().
@@ -340,15 +352,13 @@ func (p *Plugin) acquire(ctx context.Context) (*instance, error) {
 
 func (p *Plugin) release(inst *instance) {
 	if p.closed.Load() {
-		_ = inst.module.Close(context.Background())
-		p.runtime.states.Delete(inst.name)
+		p.runtime.discard(context.Background(), inst)
 		return
 	}
 	select {
 	case p.pool <- inst:
 	default:
-		_ = inst.module.Close(context.Background())
-		p.runtime.states.Delete(inst.name)
+		p.runtime.discard(context.Background(), inst)
 	}
 }
 
@@ -372,8 +382,7 @@ func (p *Plugin) call(ctx context.Context, action string, payload, out any) erro
 		return mapError(pe)
 	}
 	// 超时、trap 或内存错误：丢弃实例并补一个
-	_ = inst.module.Close(context.Background())
-	p.runtime.states.Delete(inst.name)
+	p.runtime.discard(context.Background(), inst)
 	p.replace(ctx)
 	return err
 }
@@ -416,8 +425,7 @@ func (p *Plugin) broadcast(ctx context.Context, action string, payload any) erro
 			}
 			continue
 		}
-		_ = inst.module.Close(context.Background())
-		p.runtime.states.Delete(inst.name)
+		p.runtime.discard(context.Background(), inst)
 		p.replace(ctx)
 		if firstErr == nil {
 			firstErr = err
@@ -440,8 +448,7 @@ func (p *Plugin) replace(ctx context.Context) {
 		return
 	}
 	if err := p.runtime.initInstance(ctx, inst, p.cred()); err != nil {
-		_ = inst.module.Close(ctx)
-		p.runtime.states.Delete(inst.name)
+		p.runtime.discard(ctx, inst)
 		p.runtime.log.WithField("plugin", p.manifest.Name).Errorf("初始化重建实例失败: %v", err)
 		return
 	}
@@ -467,8 +474,7 @@ func (p *Plugin) Close(ctx context.Context) {
 	for {
 		select {
 		case inst := <-p.pool:
-			_ = inst.module.Close(ctx)
-			p.runtime.states.Delete(inst.name)
+			p.runtime.discard(ctx, inst)
 		default:
 			_ = p.compiled.Close(ctx)
 			return

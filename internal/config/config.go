@@ -144,8 +144,8 @@ func Default() *Config {
 			Dir:          "./plugins",
 			Instances:    1,
 			CallTimeout:  Duration(30 * time.Second),
-			MemoryMB:     128,
-			HTTPMaxBytes: 8 << 20,
+			MemoryMB:     256,
+			HTTPMaxBytes: 16 << 20,
 		},
 		Database: DatabaseConfig{
 			Path: "cache.db",

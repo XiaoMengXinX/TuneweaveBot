@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -291,9 +292,13 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		return songInfo, fmt.Errorf("%s: music %s", render.GetURLFailed, ref.ID)
 	}
 	allowPrivate := a.cfg.Plugins.AllowPrivateNetworks
-	if err := fetch.ValidateURL(track.AudioURL, allowPrivate); err != nil {
-		a.showStatus(status, render.DownloadFailed)
-		return songInfo, err
+	// 插件经 media.* 写入的文件：宿主直接取用，不走 URL 下载/校验。
+	mediaPath := a.plugins.MediaPath(track.AudioURL)
+	if mediaPath == "" {
+		if err := fetch.ValidateURL(track.AudioURL, allowPrivate); err != nil {
+			a.showStatus(status, render.DownloadFailed)
+			return songInfo, err
+		}
 	}
 
 	coverURL := track.CoverURL
@@ -314,7 +319,12 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 	}
 
 	timeStamp := time.Now().UnixMicro()
-	musicFileName := fmt.Sprintf("%d-%s", timeStamp, textx.URLBase(track.AudioURL))
+	var musicFileName string
+	if mediaPath != "" {
+		musicFileName = fmt.Sprintf("%d-%s", timeStamp, filepath.Base(mediaPath))
+	} else {
+		musicFileName = fmt.Sprintf("%d-%s", timeStamp, textx.URLBase(track.AudioURL))
+	}
 	musicPath := filepath.Join(a.cacheDir, musicFileName)
 
 	var lastUpdateTime int64
@@ -333,7 +343,16 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		lastUpdateTime = time.Now().Unix()
 	}
 
-	if err := a.dl.DownloadMusic(ctx, fetch.Request{
+	if mediaPath != "" {
+		// 插件已把解密后的音频落盘，移动到缓存目录即可，避免再复制一遍大文件。
+		if err := os.Rename(mediaPath, musicPath); err != nil {
+			if err := copyFile(mediaPath, musicPath); err != nil {
+				a.showDownloadFailed(status, songInfo, render.DownloadFailed)
+				return songInfo, err
+			}
+			_ = os.Remove(mediaPath)
+		}
+	} else if err := a.dl.DownloadMusic(ctx, fetch.Request{
 		URL:      track.AudioURL,
 		FileName: musicFileName,
 		Policy:   track.Download,
@@ -487,6 +506,25 @@ func (a *App) fillSongInfo(songInfo *store.SongInfo, track *provider.Track, ref 
 // songFileName 歌曲与歌词文件共用命名
 func songFileName(artists, name, ext string) string {
 	return textx.SanitizeFilename(fmt.Sprintf("%s - %s.%s", strings.ReplaceAll(artists, "/", ","), name, ext))
+}
+
+// copyFile 跨文件系统落盘用：os.Rename 失败（源与目标不在同一卷）时退回复制。
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		_ = os.Remove(dst)
+		return err
+	}
+	return out.Close()
 }
 
 func (a *App) showStatus(status func(string) error, text string) {

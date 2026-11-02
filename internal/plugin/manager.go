@@ -147,6 +147,36 @@ func (m *Manager) Auths() *auth.Manager { return m.auths }
 
 func (m *Manager) Recognizers() []provider.Recognizer { return m.recognizers }
 
+// MediaRefPrefix 是 Track.AudioURL 中插件已写入文件的哨兵前缀，需与 pluginsdk 一致。
+const MediaRefPrefix = "plugin-media:"
+
+// MediaPath 把 media 哨兵（plugin-media:<token>）解析为已落盘的文件路径。
+// token 不合法或文件不存在时返回空串。
+func (m *Manager) MediaPath(audioURL string) string {
+	token, ok := strings.CutPrefix(audioURL, MediaRefPrefix)
+	if !ok || !isMediaToken(token) {
+		return ""
+	}
+	matches, _ := filepath.Glob(filepath.Join(m.runtime.cfg.MediaDir, "*-"+token+".*"))
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[0]
+}
+
+// isMediaToken 校验 token 是 32 位十六进制，避免 glob 注入。
+func isMediaToken(token string) bool {
+	if len(token) != 32 {
+		return false
+	}
+	for _, c := range token {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Manager) DefaultName() string { return m.defaultName }
 
 // PluginCommand 是插件声明的命令及其所属插件。

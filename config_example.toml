@@ -17,8 +17,8 @@ enabled = []                     # 要加载的插件名（文件名去掉 .wasm
 default = "netease"              # 默认 provider，/music、/search、/login 未指定时使用
 instances = 1                    # 每个插件的实例池大小；识曲等耗时插件可适当增加
 call_timeout = "30s"             # 单次插件调用超时
-memory_mb = 128                  # 单个插件实例内存上限
-http_max_bytes = 8388608         # 插件单次 HTTP 响应大小上限
+memory_mb = 256                  # 单个插件实例内存上限；数据面重的插件（如 Spotify 解密）需要更高
+http_max_bytes = 16777216        # 插件单次 HTTP 响应大小上限
 allow_private_networks = false   # 是否允许插件访问/下载私网地址（默认拒绝，防止 SSRF）
 proxy = ""                       # 所有插件 HTTP 及宿主下载共用的代理，留空保留环境代理
 # proxy 支持 http://host[:port]、https://host[:port]、socks5://host[:port]、socks5h://host[:port]

@@ -32,8 +32,8 @@ func GenerateTemplate(schemas []plugin.PluginConfigSchema) []byte {
 	b.WriteString("default = \"\"                             # 默认 provider，/music、/search、/login 未指定时使用\n")
 	fmt.Fprintf(&b, "instances = %d                           # 每个插件的实例池大小；识曲等耗时插件可适当增加\n", d.Plugins.Instances)
 	fmt.Fprintf(&b, "call_timeout = %s                    # 单次插件调用超时\n", tomlDuration(d.Plugins.CallTimeout))
-	fmt.Fprintf(&b, "memory_mb = %d                         # 单个插件实例内存上限\n", d.Plugins.MemoryMB)
-	fmt.Fprintf(&b, "http_max_bytes = %d               # 插件单次 HTTP 响应大小上限\n", d.Plugins.HTTPMaxBytes)
+	fmt.Fprintf(&b, "memory_mb = %d                         # 单个插件实例内存上限；数据面重的插件（如 Spotify 解密）需要更高\n", d.Plugins.MemoryMB)
+	fmt.Fprintf(&b, "http_max_bytes = %d              # 插件单次 HTTP 响应大小上限\n", d.Plugins.HTTPMaxBytes)
 	b.WriteString("allow_private_networks = false          # 是否允许插件访问/下载私网地址（默认拒绝，防止 SSRF）\n")
 	b.WriteString("proxy = \"\"                               # 所有插件 HTTP 及宿主下载共用的代理，留空保留环境代理\n")
 
