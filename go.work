@@ -2,7 +2,7 @@ go 1.26.0
 
 use (
 	.
-	./pluginsdk
-	./plugins/netease
 	./plugins/example
+	./plugins/netease
+	./pluginsdk
 )

@@ -30,6 +30,7 @@ type RuntimeConfig struct {
 	AllowPrivateNetworks bool
 	Instances            int
 	MediaDir             string // 插件经 media.* 写入的音频落盘目录
+	FSDir                string // 只读挂进沙箱的宿主目录（插件按相对路径读，如 .wvd 设备）
 }
 
 func (c RuntimeConfig) withDefaults() RuntimeConfig {
@@ -63,6 +64,12 @@ type Runtime struct {
 
 func NewRuntime(ctx context.Context, cfg RuntimeConfig, st *store.Store, log *logrus.Logger, httpClient *http.Client) (*Runtime, error) {
 	cfg = cfg.withDefaults()
+	if cfg.FSDir != "" {
+		if info, err := os.Stat(cfg.FSDir); err != nil || !info.IsDir() {
+			log.Warnf("插件只读挂载目录 %q 不存在或不是目录，已禁用插件文件系统访问", cfg.FSDir)
+			cfg.FSDir = ""
+		}
+	}
 	rtCfg := wazero.NewRuntimeConfig().
 		WithCloseOnContextDone(true).
 		WithMemoryLimitPages(uint32(cfg.MemoryMB) * 16) // 1 page = 64KiB
@@ -317,9 +324,13 @@ func (r *Runtime) instantiate(ctx context.Context, p *Plugin, pluginName string,
 		mediaDir:     r.cfg.MediaDir,
 	}
 	r.states.Store(name, state)
-	module, err := r.rt.InstantiateModule(ctx, p.compiled, wazero.NewModuleConfig().
+	modCfg := wazero.NewModuleConfig().
 		WithName(name).
-		WithStartFunctions("_initialize"))
+		WithStartFunctions("_initialize")
+	if r.cfg.FSDir != "" {
+		modCfg = modCfg.WithFSConfig(wazero.NewFSConfig().WithReadOnlyDirMount(r.cfg.FSDir, "/"))
+	}
+	module, err := r.rt.InstantiateModule(ctx, p.compiled, modCfg)
 	if err != nil {
 		r.states.Delete(name)
 		return nil, fmt.Errorf("实例化插件 %s 失败: %w", pluginName, err)

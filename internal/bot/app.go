@@ -275,6 +275,7 @@ func pluginConfig(cfg *config.Config) plugin.Config {
 			HTTPMaxBytes:         cfg.Plugins.HTTPMaxBytes,
 			AllowPrivateNetworks: cfg.Plugins.AllowPrivateNetworks,
 			Instances:            cfg.Plugins.Instances,
+			FSDir:                cfg.Plugins.FSDir,
 		},
 		Configs: configs,
 	}

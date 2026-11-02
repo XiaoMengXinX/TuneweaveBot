@@ -98,6 +98,7 @@ type PluginsConfig struct {
 	HTTPMaxBytes         int64    `toml:"http_max_bytes"`
 	AllowPrivateNetworks bool     `toml:"allow_private_networks"`
 	Proxy                string   `toml:"proxy"`
+	FSDir                string   `toml:"fs_dir"`
 	// Config 保存每个插件的独立配置段 [plugins.<name>]，直接传给对应插件。
 	Config map[string]map[string]any `toml:"-"`
 }
@@ -106,7 +107,7 @@ type PluginsConfig struct {
 var pluginsHostKeys = map[string]bool{
 	"dir": true, "enabled": true, "default": true, "instances": true,
 	"call_timeout": true, "memory_mb": true, "http_max_bytes": true,
-	"allow_private_networks": true, "proxy": true,
+	"allow_private_networks": true, "proxy": true, "fs_dir": true,
 }
 
 // HTTPClient 按 [plugins] proxy 构造插件与宿主共用的 HTTP 客户端；

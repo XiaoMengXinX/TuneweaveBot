@@ -156,7 +156,8 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 | `auth.apply` | `{credential}` → `null` | auth |
 
 能力相互独立：只做点歌实现 `provider.*`；识曲另加 `recognizer.recognize`；登录另加
-`auth.*`。只有**默认 provider** 必须具备 `provider` 能力。
+`auth.*`；需要在插件内解密音频再交给宿主的另加 `media`（见 §9）。只有**默认 provider**
+必须具备 `provider` 能力。
 
 - `provider.match`：**在每条消息上调用**，只做本地解析（识别链接/ID），不得做重网络
   请求（短链跳转除外）。无法识别时返回 `{ref:null}`。
@@ -254,6 +255,7 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 | `kv.get/set/delete/list` | 按插件隔离的 KV（SQLite），保存 cookie/token 等 |
 | `config.get` | 只返回该插件的 `[plugins.<name>]` |
 | `time.now` / `random` | 便利接口（wasip1 下系统时间/熵不可直接用） |
+| `media.open/write/close/abort` | 把插件生成的大音频流式落盘（需声明 `media` 能力），见 §9 |
 
 `pluginsdk.NewHTTPClient()` 返回一个把请求转发到 `http.request` 的 `*http.Client`，
 依赖 `net/http` 的第三方库（如 `Music163Api-Go`）几乎可以原样跑在插件里。
@@ -283,14 +285,24 @@ HTTP 约定：
 
 ## 9. 数据面较大的平台（下载即解密）
 
-有些平台（如 Spotify）的音频是加密流，需要先取密钥再解密、转码。加密音频整首可达
-几十 MB，**绝不能流经 wasm**——会同时撞 `http_max_bytes` 与实例内存上限。
+有些平台（如 Spotify）的音频是加密流，需要先取密钥再解密。宿主对加密一无所知，
+所以解密必须在插件内完成；但解密后的整轨可达几十 MB，用 `provider.resolve` 的
+JSON 响应一次性穿过 ABI 既撞 `http_max_bytes` 又占实例内存。
 
-正确切分：插件只做**纯 HTTP 编排**（解析、元数据、取 CDN URL 与解密密钥这类“指针级”
-小数据），把下载+解密+转码这类大数据面交给宿主执行，插件拿回本地文件路径填进
-`track`。宿主的解密能力是**平台中立的原语**（输入密钥端点/认证头/密文 URL，输出
-解密文件），平台专属的“打哪个端点、带什么头”仍由插件作为参数传入——这样宿主依然不
-认识任何具体平台。
+正确切分用 **media 能力**：插件在 manifest 声明 `"media"`，自己完成解密，然后用
+`Context.OpenMedia(ext)` 向宿主申请一个写入会话，分块 `sink.Write(chunk)` 把解密
+字节流式交给宿主落盘，`sink.Close()` 结束；最后把 `track.AudioURL` 填成
+`pluginsdk.MediaRef(sink.Token())`。宿主识别这个哨兵后直接使用已落盘的文件，跳过
+URL 下载与校验。失败时 `sink.Abort()` 让宿主删除半成品。
+
+这样平台专属的取密钥/解密逻辑全在插件里，宿主只提供“把字节写到文件”这个中立原语，
+依然不认识任何具体平台。数据面重的插件通常要调高 `[plugins] memory_mb` 与
+`http_max_bytes`（默认 256MB / 16MB 已够 AAC 256k 单轨）。
+
+解密往往还要一个密钥/设备文件（如 Widevine 的 `.wvd`）。插件跑在沙箱里默认没有文件
+系统访问，宿主实例化时只把 `[plugins] fs_dir` 这一个目录**只读**挂进沙箱。插件用
+`os.ReadFile` 读相对 `fs_dir` 的路径即可（如 Spotify 的 `wvd_path`）；`fs_dir` 留空
+则插件完全无文件系统访问。设备文件由 operator 放进 `fs_dir`，不随插件分发。
 
 ---
 
@@ -300,3 +312,7 @@ HTTP 约定：
 限制 HTTP 目标、响应大小、内存与调用时长。插件返回的 `audio_url` / `cover_url` 在
 下载前也会做 scheme 与私网检查（可用 `[plugins] allow_private_networks` 放开，仅供
 本地测试）。宿主不内置任何平台实现，默认 provider 由 `[plugins] default` 决定。
+
+`[plugins] fs_dir` 把一个目录**只读**挂进所有插件的沙箱（默认不挂，插件无文件系统
+访问）。只读挂载仍可能被相对路径 `../../` 越界读取 `fs_dir` 之上的文件，所以只在
+该目录放插件该看到的文件，不要指向家目录或仓库根。
