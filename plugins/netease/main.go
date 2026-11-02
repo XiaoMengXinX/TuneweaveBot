@@ -18,11 +18,19 @@ func init() { pluginsdk.Main(handle) }
 
 func main() {}
 
+// 构建时由 -ldflags -X 注入。
+var (
+	commitSHA string
+	buildTime string
+)
+
 func manifest() Manifest {
 	return Manifest{
 		Name:             providerName,
 		DisplayName:      displayName,
 		Version:          "1.0.0",
+		Commit:           commitSHA,
+		BuildTime:        buildTime,
 		ABI:              pluginsdk.ABI,
 		Code:             providerCode,
 		Capabilities:     []string{"provider", "recognizer", "auth"},

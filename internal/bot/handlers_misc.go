@@ -37,7 +37,7 @@ func (a *App) handleStatus(ctx context.Context, tg *tgb.Bot, update *models.Upda
 	if a.plugins != nil {
 		for _, info := range a.plugins.Info() {
 			text.WriteString("\n")
-			text.WriteString(render.PluginLine(info.DisplayName, info.Name, info.Version, strings.Join(info.Capabilities, "/")))
+			text.WriteString(render.PluginLine(info.DisplayName, info.Name, info.Version, info.Commit, info.BuildTime, strings.Join(info.Capabilities, "/")))
 		}
 	}
 	for _, name := range a.auth.Names() {

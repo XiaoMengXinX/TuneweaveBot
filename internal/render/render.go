@@ -4,6 +4,7 @@ package render
 import (
 	"fmt"
 	"html"
+	"strings"
 	"unicode/utf16"
 )
 
@@ -232,9 +233,16 @@ func SearchItemProvider(n int, name, artists, providerName string) string {
 		fmt.Sprintf("%d.", n), Escape(name), Escape(artists), Escape(providerName))
 }
 
-// PluginLine 是 /status 中的一行插件信息。
-func PluginLine(displayName, name, version, capabilities string) string {
-	return fmt.Sprintf("<b>[插件]</b> %s (%s) v%s 能力: %s", Escape(displayName), Escape(name), Escape(version), Escape(capabilities))
+// PluginLine 是 /status 中的一行插件信息，commit 与 buildTime 为空时省略。
+func PluginLine(displayName, name, version, commit, buildTime, capabilities string) string {
+	build := ""
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	if commit != "" || buildTime != "" {
+		build = fmt.Sprintf(" [%s]", Escape(strings.TrimSpace(commit+" "+buildTime)))
+	}
+	return fmt.Sprintf("<b>[插件]</b> %s (%s) v%s%s 能力: %s", Escape(displayName), Escape(name), Escape(version), build, Escape(capabilities))
 }
 
 // AuthLine 是 /status 中的一行登录状态。

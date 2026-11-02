@@ -215,6 +215,8 @@ type PluginInfo struct {
 	Name         string
 	DisplayName  string
 	Version      string
+	Commit       string
+	BuildTime    string
 	Capabilities []string
 }
 
@@ -250,6 +252,8 @@ func (m *Manager) Info() []PluginInfo {
 			Name:         p.manifest.Name,
 			DisplayName:  p.manifest.DisplayName,
 			Version:      p.manifest.Version,
+			Commit:       p.manifest.Commit,
+			BuildTime:    p.manifest.BuildTime,
 			Capabilities: append([]string(nil), p.manifest.Capabilities...),
 		})
 	}

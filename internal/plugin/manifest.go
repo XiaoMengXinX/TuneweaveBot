@@ -15,6 +15,8 @@ type Manifest struct {
 	Name             string        `json:"name"`
 	DisplayName      string        `json:"display_name"`
 	Version          string        `json:"version"`
+	Commit           string        `json:"commit,omitempty"`     // 构建所用的 git commit
+	BuildTime        string        `json:"build_time,omitempty"` // 构建时间（RFC 3339）
 	ABI              int           `json:"abi"`
 	Code             string        `json:"code"`
 	Capabilities     []string      `json:"capabilities"`

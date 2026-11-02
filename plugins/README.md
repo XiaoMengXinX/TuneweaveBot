@@ -179,6 +179,8 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
   "name": "example",
   "display_name": "示例音乐",
   "version": "1.0.0",
+  "commit": "9620876...",
+  "build_time": "2026-11-03T01:40:00Z",
   "abi": 1,
   "code": "ex",
   "capabilities": ["provider", "recognizer", "auth"],
@@ -201,6 +203,9 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 
 - `name`：`^[a-z0-9][a-z0-9_-]{0,31}$`，用于 `[plugins] enabled/default` 与 `/search <name>`
 - `code`：`^[a-z0-9]{1,8}$`，用于 Telegram 回调/start 参数（`code_base64url(id)`）
+- `commit` / `build_time`：可选，构建所用的 git commit 与构建时间（RFC 3339），显示在
+  `/status`。通常用 `-ldflags "-X main.commitSHA=... -X main.buildTime=..."` 在构建时注入，
+  `build-plugins.sh` 已自动注入
 - `commands.type`：`provider`（默认，参数交给该插件）或 `template`（`{args}` 替换后生成链接再解析）
 - `http_allowed_hosts`：为空表示禁止一切 HTTP；支持 `*.example.com` 通配
 - `link_hosts`：`provider.match` 能识别的链接域名（子串匹配）。声明后，像链接的文本只有
