@@ -134,12 +134,20 @@ func (m *Manager) fetchVersion(ctx context.Context, url string) (VersionInfo, er
 	return v, nil
 }
 
+// updateClient 复用插件 HTTP 客户端的代理与私网拦截，但会跟随重定向：
+// 发布文件常经 302 跳转到实际存储（如 GitHub Releases），每一跳仍经过私网检查。
+func (m *Manager) updateClient() *http.Client {
+	c := *m.runtime.httpClient
+	c.CheckRedirect = nil
+	return &c
+}
+
 func (m *Manager) fetch(ctx context.Context, url string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := m.runtime.httpClient.Do(req)
+	resp, err := m.updateClient().Do(req)
 	if err != nil {
 		return nil, err
 	}

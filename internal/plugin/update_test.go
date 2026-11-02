@@ -56,11 +56,14 @@ func TestApplyUpdate(t *testing.T) {
 	)
 	versionJSON := []byte(`{"version":"1.0.0","build_time":"` + newBuild + `","commit":"abc"}`)
 	var newWasm []byte
+	// 与 GitHub Releases 一样，发布地址先 302 跳转到实际存储
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/version.json":
+		case "/version.json", "/netease.wasm.gz":
+			http.Redirect(w, r, "/storage"+r.URL.Path, http.StatusFound)
+		case "/storage/version.json":
 			_, _ = w.Write(versionJSON)
-		case "/netease.wasm.gz":
+		case "/storage/netease.wasm.gz":
 			_, _ = w.Write(newWasm)
 		default:
 			http.NotFound(w, r)
