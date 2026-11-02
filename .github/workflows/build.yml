@@ -26,16 +26,12 @@ jobs:
         run: go test ./...
       - name: Test pluginsdk
         run: cd pluginsdk && go test ./...
-      - name: Test plugins
-        run: cd plugins/netease && go test ./...
       - name: Build
         run: |
           sudo timedatectl set-timezone Asia/Shanghai
-          bash build.sh
+          SKIP_PLUGINS=1 bash build.sh
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TuneweaveBot
-          path: |
-            TuneweaveBot
-            dist/plugins/*.wasm.gz
+          path: TuneweaveBot

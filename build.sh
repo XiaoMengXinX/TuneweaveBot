@@ -14,4 +14,7 @@ LDFlags="\
 
 CGO_ENABLED=0 go build -trimpath -ldflags "${LDFlags}" -o TuneweaveBot ./cmd/tuneweavebot
 
-sh build-plugins.sh
+# SKIP_PLUGINS=1 时只构建主程序（插件由 plugin 工作流单独构建）
+if [ "${SKIP_PLUGINS:-0}" != "1" ]; then
+    sh build-plugins.sh
+fi
