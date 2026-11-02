@@ -82,6 +82,7 @@ func canonicalize(ref Ref) (Ref, error) {
 	return Ref{
 		Provider:  providerName,
 		ID:        strconv.Itoa(songID),
+		Sub:       strconv.Itoa(programID), // 记下来源节目，供 resolve 用节目详情补全歌曲元数据
 		URL:       ref.URL,
 		PageURL:   songPageURL(songID),
 		ShareText: songURL(songID),
@@ -100,9 +101,6 @@ type NoAudio struct {
 }
 
 func resolve(ref Ref) (*resolveResult, error) {
-	if ref.Sub == "program" {
-		return resolveProgram(ref)
-	}
 	musicID, err := strconv.Atoi(ref.ID)
 	if err != nil || musicID <= 0 {
 		return nil, pluginsdk.Fail("not_found", "invalid song id "+ref.ID)
@@ -111,34 +109,23 @@ func resolve(ref Ref) (*resolveResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Sub 为来源节目 ID（canonicalize 写入）：节目主歌曲的 song/detail 常缺专辑/封面，
+	// 用节目详情补全。
+	if programID, perr := strconv.Atoi(ref.Sub); perr == nil && programID > 0 {
+		prog, derr := client.ProgramDetail(programID)
+		if derr != nil {
+			return nil, derr
+		}
+		enrichFromProgram(&detail, &prog)
+		track, noAudio := trackFromSong(Ref{ID: ref.ID, URL: ref.URL}, detail.Songs[0], urlData)
+		track.PageURL = programURL(programID)
+		track.ShareText = songURL(musicID)
+		return &resolveResult{Track: track, NoAudio: noAudio}, nil
+	}
 	if len(detail.Songs) == 0 {
 		return nil, pluginsdk.Fail("not_found", fmt.Sprintf("song %d", musicID))
 	}
 	track, noAudio := trackFromSong(ref, detail.Songs[0], urlData)
-	return &resolveResult{Track: track, NoAudio: noAudio}, nil
-}
-
-func resolveProgram(ref Ref) (*resolveResult, error) {
-	programID, err := strconv.Atoi(ref.ID)
-	if err != nil || programID <= 0 {
-		return nil, pluginsdk.Fail("not_found", "invalid program id "+ref.ID)
-	}
-	prog, err := client.ProgramDetail(programID)
-	if err != nil {
-		return nil, err
-	}
-	songID := prog.Program.MainSong.ID
-	if songID == 0 {
-		return nil, pluginsdk.Fail("not_found", fmt.Sprintf("program %d has no main song", programID))
-	}
-	detail, urlData, err := client.SongDetailAndURL(songID)
-	if err != nil {
-		return nil, err
-	}
-	enrichFromProgram(&detail, &prog)
-	track, noAudio := trackFromSong(Ref{ID: strconv.Itoa(songID), URL: ref.URL}, detail.Songs[0], urlData)
-	track.PageURL = programURL(programID)
-	track.ShareText = songURL(songID)
 	return &resolveResult{Track: track, NoAudio: noAudio}, nil
 }
 

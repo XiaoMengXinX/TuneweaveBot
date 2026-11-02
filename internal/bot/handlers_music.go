@@ -352,6 +352,10 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 			}
 			_ = os.Remove(mediaPath)
 		}
+		// media 旁路下 track.Size 通常为 0（插件未必知道解密后大小），用落盘文件回填。
+		if info, err := os.Stat(musicPath); err == nil {
+			songInfo.MusicSize = int(info.Size())
+		}
 	} else if err := a.dl.DownloadMusic(ctx, fetch.Request{
 		URL:      track.AudioURL,
 		FileName: musicFileName,

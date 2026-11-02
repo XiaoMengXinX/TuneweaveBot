@@ -30,6 +30,12 @@ func (c *apiClient) SetMUSICU(musicU string) {
 	c.musicU = musicU
 }
 
+func (c *apiClient) hasMUSICU() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.musicU != ""
+}
+
 func (c *apiClient) requestData() utils.RequestData {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

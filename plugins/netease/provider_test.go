@@ -63,7 +63,7 @@ func TestCanonicalize(t *testing.T) {
 		return jsonResponse(`{"code":200,"program":{"id":2061,"mainSong":{"id":123}}}`), nil
 	})
 	ref, err := canonicalize(Ref{Provider: providerName, ID: "2061", Sub: "program"})
-	if err != nil || ref.ID != "123" || ref.Sub != "" || ref.PageURL != songPageURL(123) || ref.ShareText != songURL(123) {
+	if err != nil || ref.ID != "123" || ref.Sub != "2061" || ref.PageURL != songPageURL(123) || ref.ShareText != songURL(123) {
 		t.Fatalf("canonicalize = %+v, %v", ref, err)
 	}
 	if ref, err := canonicalize(Ref{Provider: providerName, ID: "1"}); err != nil || ref.PageURL != songPageURL(1) {
@@ -129,6 +129,32 @@ func TestResolveNotFound(t *testing.T) {
 	var pe *pluginsdk.Error
 	if !errors.As(err, &pe) || pe.Code != "not_found" {
 		t.Errorf("err = %v, want not_found", err)
+	}
+}
+
+// Sub 为节目 ID 时，resolve 用节目详情补全 song/detail 缺失的专辑/封面/艺术家。
+func TestResolveProgramEnrich(t *testing.T) {
+	setTestClient(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/eapi/dj/program/detail":
+			return jsonResponse(`{"code":200,"program":{"id":2061,"name":"Radio","coverUrl":"https://p1.music.126.net/cover.jpg","mainSong":{"id":123,"name":"Song","artists":[{"id":9,"name":"DJ A"}]}}}`), nil
+		default:
+			return jsonResponse(`{"/api/v3/song/detail":{"songs":[{"id":123,"name":"Song","dt":2000,"ar":[],"al":{"name":"","picUrl":""}}]},"/api/song/enhance/player/url/v1":{"code":200,"data":[{"url":"https://m8.music.126.net/1.mp3","size":32000,"md5":"abc"}]}}`), nil
+		}
+	})
+	result, err := resolve(Ref{ID: "123", Sub: "2061"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := result.Track
+	if track.Album != "Radio" || track.CoverURL != "https://p1.music.126.net/cover.jpg" {
+		t.Errorf("program enrich missing: album=%q cover=%q", track.Album, track.CoverURL)
+	}
+	if len(track.Artists) != 1 || track.Artists[0] != "DJ A" {
+		t.Errorf("artists = %v, want [DJ A]", track.Artists)
+	}
+	if track.PageURL != programURL(2061) || track.ShareText != songURL(123) {
+		t.Errorf("links = %q / %q", track.PageURL, track.ShareText)
 	}
 }
 

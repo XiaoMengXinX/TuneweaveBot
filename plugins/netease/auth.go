@@ -5,7 +5,7 @@ import (
 )
 
 func authStatus() (any, error) {
-	if client.musicU == "" {
+	if !client.hasMUSICU() {
 		return AuthStatus{Authenticated: false}, nil
 	}
 	valid, err := client.LoginStatusValid()
