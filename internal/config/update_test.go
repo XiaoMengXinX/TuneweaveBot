@@ -81,36 +81,36 @@ func TestUpdatePluginValueInsert(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 段与键都不存在时应新建而非报错
-	if err := UpdatePluginValue(path, "spotify", "sp_dc", "COOKIE"); err != nil {
+	if err := UpdatePluginValue(path, "demo", "token", "COOKIE"); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Plugins.Config["spotify"]["sp_dc"]; got != "COOKIE" {
-		t.Errorf("sp_dc = %q", got)
+	if got := cfg.Plugins.Config["demo"]["token"]; got != "COOKIE" {
+		t.Errorf("token = %q", got)
 	}
 }
 
 func TestUpdatePluginValueExistingSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	src := "[bot]\ntoken = \"x\"\n\n[plugins.spotify]\nquality = \"MP4_256\"\n"
+	src := "[bot]\ntoken = \"x\"\n\n[plugins.demo]\nquality = \"high\"\n"
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// 段存在但键缺失时在段内补齐
-	if err := UpdatePluginValue(path, "spotify", "sp_dc", "COOKIE"); err != nil {
+	if err := UpdatePluginValue(path, "demo", "token", "COOKIE"); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Plugins.Config["spotify"]["sp_dc"]; got != "COOKIE" {
-		t.Errorf("sp_dc = %q", got)
+	if got := cfg.Plugins.Config["demo"]["token"]; got != "COOKIE" {
+		t.Errorf("token = %q", got)
 	}
-	if got := cfg.Plugins.Config["spotify"]["quality"]; got != "MP4_256" {
+	if got := cfg.Plugins.Config["demo"]["quality"]; got != "high" {
 		t.Errorf("原有键被破坏: quality = %q", got)
 	}
 }

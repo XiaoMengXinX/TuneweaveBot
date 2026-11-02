@@ -33,7 +33,7 @@ type RuntimeConfig struct {
 	Instances            int    // 常驻实例池大小，只处理轻量调用
 	MaxTasks             int    // 全局同时进行的重任务（heavyActions）上限
 	MediaDir             string // 插件经 media.* 写入的音频落盘目录
-	FSDir                string // 只读挂进沙箱的宿主目录（插件按相对路径读，如 .wvd 设备）
+	FSDir                string // 只读挂进沙箱的宿主目录（插件按相对路径读，如密钥、设备文件）
 	ScratchDir           string // 可写挂进沙箱 ScratchMount 的宿主目录
 }
 

@@ -20,8 +20,8 @@ call_timeout = "30s"
 memory_mb = 256
 http_max_bytes = 16777216
 fs_dir = "./plugin-fs"
-[plugins.spotify]
-sp_dc = "x"
+[plugins.demo]
+token = "x"
 [database]
 path = "cache.db"
 `
@@ -35,8 +35,8 @@ path = "cache.db"
 	if c.Plugins.FSDir != "./plugin-fs" {
 		t.Fatalf("FSDir=%q", c.Plugins.FSDir)
 	}
-	if _, ok := c.Plugins.Config["spotify"]; !ok {
-		t.Fatalf("spotify section lost: %+v", c.Plugins.Config)
+	if _, ok := c.Plugins.Config["demo"]; !ok {
+		t.Fatalf("demo section lost: %+v", c.Plugins.Config)
 	}
 	if _, ok := c.Plugins.Config["fs_dir"]; ok {
 		t.Fatalf("fs_dir treated as plugin section")

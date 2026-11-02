@@ -10,7 +10,7 @@ import (
 func mediaState(t *testing.T, capable bool) *instanceState {
 	t.Helper()
 	return &instanceState{
-		plugin:       "spotify",
+		plugin:       "demo",
 		mediaCapable: capable,
 		mediaDir:     t.TempDir(),
 	}
@@ -63,7 +63,7 @@ func TestMediaLifecycle(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	path := filepath.Join(s.mediaDir, "spotify-"+token+".m4a")
+	path := filepath.Join(s.mediaDir, "demo-"+token+".m4a")
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read output: %v", err)
@@ -72,7 +72,7 @@ func TestMediaLifecycle(t *testing.T) {
 		t.Fatalf("output = %q, want %q", got, "hello world")
 	}
 	// tmp 文件应已转正，不留残余
-	if _, err := os.Stat(filepath.Join(s.mediaDir, "spotify-"+token+".tmp")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(s.mediaDir, "demo-"+token+".tmp")); !os.IsNotExist(err) {
 		t.Fatal("tmp file should be gone after close")
 	}
 }

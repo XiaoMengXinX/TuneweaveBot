@@ -86,7 +86,7 @@ memory_mb = 128            # 单实例内存上限
 http_max_bytes = 16777216  # 插件单次 HTTP 响应上限
 allow_private_networks = false  # 插件 HTTP 与下载是否允许私网地址（默认拒绝，防 SSRF）
 proxy = ""                 # 所有插件 HTTP 及宿主下载共用的代理，如 http://127.0.0.1:8080 或 socks5://127.0.0.1:1080
-fs_dir = ""                # 只读挂进沙箱的宿主目录，插件按相对路径读文件（如 Spotify 的 .wvd）；留空=无文件系统访问
+fs_dir = ""                # 只读挂进沙箱的宿主目录，插件按相对路径读文件（如密钥、设备文件）；留空=无文件系统访问
 
 [plugins.netease]          # 原样传给 netease 插件，宿主不解释其内容
 music_u = "YOUR_MUSIC_U"   # 网易云 cookie 中的 MUSIC_U（可留空，用 /login 登录；下载无损需 VIP）

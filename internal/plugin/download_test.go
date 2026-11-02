@@ -9,7 +9,7 @@ import (
 
 func TestReleaseDownloads(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "spotify-dl-x.bin")
+	path := filepath.Join(dir, "demo-dl-x.bin")
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}

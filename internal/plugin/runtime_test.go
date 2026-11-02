@@ -27,11 +27,11 @@ func TestHostAllowed(t *testing.T) {
 
 func TestPluginNameHint(t *testing.T) {
 	for path, want := range map[string]string{
-		"plugins/netease.wasm":     "netease",
-		"plugins/My Plugin.WASM":   "myplugin",
-		"plugins/---.wasm":         "probe",
-		"plugins/qq_music.wasm":    "qq_music",
-		"plugins/spotify-1.0.wasm": "spotify-10",
+		"plugins/netease.wasm":   "netease",
+		"plugins/My Plugin.WASM": "myplugin",
+		"plugins/---.wasm":       "probe",
+		"plugins/qq_music.wasm":  "qq_music",
+		"plugins/demo-1.0.wasm":  "demo-10",
 	} {
 		if got := pluginNameHint(path); got != want {
 			t.Errorf("pluginNameHint(%q) = %q, want %q", path, got, want)

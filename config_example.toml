@@ -23,15 +23,13 @@ allow_private_networks = false   # 是否允许插件访问/下载私网地址�
 proxy = ""                       # 所有插件 HTTP 及宿主下载共用的代理，留空保留环境代理
 # proxy 支持 http://host[:port]、https://host[:port]、socks5://host[:port]、socks5h://host[:port]
 # 可选认证，如 http://user:password@127.0.0.1:8080 或 socks5://127.0.0.1:1080；不允许路径、query、fragment
-fs_dir = ""                      # 只读挂进沙箱的宿主目录；插件按相对路径读文件（如 Spotify 的 .wvd 设备）。留空=插件无文件系统访问
+fs_dir = ""                      # 只读挂进沙箱的宿主目录；插件按相对路径读文件（如密钥、设备文件）。留空=插件无文件系统访问
 
 # 每个插件一个独立配置段 [plugins.<插件名>]，整段原样传给该插件，宿主不解释其内容。
 [plugins.netease]
 music_u = "你的 MUSIC_U cookie" # 可留空：留空或失效时用管理员命令 /login 扫码或 /login netease token 提交 cookie 登录
 level = "hires"                  # 优先音质: standard/higher/lossless/hires/jyeffect(高清环绕声)/sky(沉浸环绕声)/jymaster(超清母带)，账号无权限时自动降级
 # 环境变量覆盖：TUNEWEAVE_PLUGINS_CONFIG_NETEASE_LEVEL=lossless
-
-# Spotify 插件在独立仓库维护，构建与配置见 https://github.com/XiaoMengXinX/TuneweaveBot-Spotify
 
 [database]
 path = "cache.db" # SQLite 数据库路径
