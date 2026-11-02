@@ -48,6 +48,10 @@ func main() {
 	defer stop()
 
 	if flag.Arg(0) == "gen-config" {
+		// flag 遇到子命令即停止解析，子命令后的参数需再解析一次
+		if err := flag.CommandLine.Parse(flag.Args()[1:]); err != nil {
+			os.Exit(2)
+		}
 		if err := genConfig(ctx, *pluginDir); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
