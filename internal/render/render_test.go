@@ -27,9 +27,9 @@ func TestEscapeInTemplates(t *testing.T) {
 		t.Errorf("caption 格式错误: %s", caption)
 	}
 
-	status := MusicStatus("a<b", "c&d", "mp3", 1.0, Downloading)
-	if !strings.Contains(status, "a&lt;b") || !strings.Contains(status, "c&amp;d") {
-		t.Errorf("状态消息未转义: %s", status)
+	status := MusicStatus("a<b", "c&d", "mp3", Downloading)
+	if status != "a&lt;b\n专辑: c&amp;d\n格式: mp3\n下载中..." {
+		t.Errorf("状态消息格式错误: %q", status)
 	}
 
 	about := About("go1.22", "v3<a", "sha", "2024", "darwin/arm64", []string{"netease"})
@@ -57,11 +57,31 @@ func TestStatusInfoChatVariants(t *testing.T) {
 	}
 }
 
-func TestDownloadStatusFormat(t *testing.T) {
-	got := DownloadStatus("1.5MB/s", 3.0, 10.0, 30)
-	want := " 1.5MB/s\n3.00MB/10.00MB 30%"
-	if got != want {
-		t.Errorf("DownloadStatus = %q, want %q", got, want)
+func TestTransferWithInfo(t *testing.T) {
+	const mb = 1024 * 1024
+	bar := TransferProgress("1.5 MB/s", 3*mb, 10*mb)
+	if got, want := TransferWithInfo("散歩道", "散歩道", "flac", Downloading, "1.5 MB/s", 3*mb, 10*mb), "散歩道\n专辑: 散歩道\n格式: flac\n下载中...\n"+bar; got != want {
+		t.Errorf("TransferWithInfo = %q, want %q", got, want)
+	}
+	if got, want := TransferWithInfo("a", "b", "", Downloading, "1.5 MB/s", 3*mb, 10*mb), "a\n专辑: b\n下载中...\n"+bar; got != want {
+		t.Errorf("TransferWithInfo 无格式 = %q, want %q", got, want)
+	}
+}
+
+func TestTransferProgress(t *testing.T) {
+	const mb = 1024 * 1024
+	cases := []struct {
+		written, total int64
+		want           string
+	}{
+		{3 * mb, 10 * mb, "<code>[======>             ]  30%</code>\n<code>3.00/10.00 MB  1.5 MB/s</code>"},
+		{10 * mb, 10 * mb, "<code>[====================] 100%</code>\n<code>10.00/10.00 MB  1.5 MB/s</code>"},
+		{0, 10 * mb, "<code>[>                   ]   0%</code>\n<code>0.00/10.00 MB  1.5 MB/s</code>"},
+	}
+	for _, c := range cases {
+		if got := TransferProgress("1.5 MB/s", c.written, c.total); got != c.want {
+			t.Errorf("TransferProgress(%d, %d) = %q, want %q", c.written, c.total, got, c.want)
+		}
 	}
 }
 
@@ -161,5 +181,13 @@ func TestNoAudio(t *testing.T) {
 	}
 	if got := NoAudio("需购买<专辑>"); got != "无法获取这首歌：需购买&lt;专辑&gt;" {
 		t.Errorf("NoAudio = %q", got)
+	}
+}
+
+func TestSpeed(t *testing.T) {
+	for in, want := range map[float64]string{0: "0 KB/s", 512 * 1024: "512 KB/s", 3 * 1024 * 1024: "3.00 MB/s"} {
+		if got := Speed(in); got != want {
+			t.Errorf("Speed(%v) = %q, want %q", in, got, want)
+		}
 	}
 }

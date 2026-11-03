@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	tgb "github.com/go-telegram/bot"
@@ -197,7 +199,7 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, message *model
 		if onInfo != nil {
 			onInfo(songInfo)
 		}
-		msgResult, err := a.reply(ctx, message, render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, render.HitCache))
+		msgResult, err := a.reply(ctx, message, render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.HitCache))
 		if err != nil {
 			return err
 		}
@@ -229,7 +231,7 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, message *model
 		if onInfo != nil {
 			onInfo(songInfo)
 		}
-		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, render.HitCache)); err != nil {
+		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.HitCache)); err != nil {
 			return err
 		}
 		return a.sendCached(ctx, songInfo, displayTrack(), chatID, reply, msgResult.ID, status)
@@ -243,7 +245,7 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, message *model
 
 // sendCached 发送已缓存歌曲，成功后删除状态消息，失败时在状态消息上展示原因。
 func (a *App) sendCached(ctx context.Context, songInfo store.SongInfo, track *provider.Track, chatID int64, reply *models.ReplyParameters, statusMsgID int, status func(string) error) error {
-	if _, err := a.sendMusic(ctx, songInfo, track, "", "", chatID, reply); err != nil {
+	if _, err := a.sendMusic(ctx, songInfo, track, "", "", chatID, reply, nil); err != nil {
 		a.showDownloadFailed(status, songInfo, render.SendFailed)
 		return err
 	}
@@ -266,9 +268,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 				return
 			}
 			lastProgress = time.Now().Unix()
-			percent := p.Written * 100 / p.Total
-			text := render.DownloadingWithInfo(p.Title, p.Album, p.Speed,
-				float64(p.Written)/1024/1024, float64(p.Total)/1024/1024, percent)
+			text := render.TransferWithInfo(p.Title, p.Album, "", render.Downloading, p.Speed, p.Written, p.Total)
 			if err := status(text); err != nil {
 				a.log.Errorln(err)
 			}
@@ -354,8 +354,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		if p.Attempt > 1 {
 			statusText = render.Redownloading
 		}
-		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024,
-			statusText+render.DownloadStatus(p.Speed, float64(p.Written)/1024/1024, float64(p.Total)/1024/1024, p.Written*100/p.Total))); err != nil {
+		if err := status(render.TransferWithInfo(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, statusText, p.Speed, p.Written, p.Total)); err != nil {
 			a.log.Errorln(err)
 		}
 		lastUpdateTime = time.Now().Unix()
@@ -376,7 +375,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 			songInfo.MusicSize = int(info.Size())
 		}
 	} else {
-		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, render.Downloading)); err != nil {
+		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.Downloading)); err != nil {
 			return songInfo, err
 		}
 		if err := a.dl.DownloadMusic(ctx, fetch.Request{
@@ -461,11 +460,13 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		return songInfo, err
 	}
 
-	if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, render.Uploading)); err != nil {
+	if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.Uploading)); err != nil {
 		return songInfo, err
 	}
 
-	audio, err := a.sendMusic(ctx, songInfo, track, filePath, resizePicPath, chatID, reply)
+	progress, stopProgress := a.watchUpload(status, songInfo)
+	audio, err := a.sendMusic(ctx, songInfo, track, filePath, resizePicPath, chatID, reply, progress)
+	stopProgress()
 	if err != nil {
 		a.showDownloadFailed(status, songInfo, render.SendFailed)
 		return songInfo, err
@@ -563,7 +564,7 @@ func (a *App) showStatus(status func(string) error, text string) {
 
 // 错误详情可能含服务器 IP、下载直链等，只展示错误类型，详情由调用方记录日志
 func (a *App) showDownloadFailed(status func(string) error, songInfo store.SongInfo, reason string) {
-	a.showStatus(status, render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, float64(songInfo.MusicSize)/1024/1024, reason+"\n"+render.RetryLater))
+	a.showStatus(status, render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, reason+"\n"+render.RetryLater))
 }
 
 func (a *App) musicCaption(songInfo store.SongInfo) string {
@@ -584,7 +585,53 @@ func (a *App) cachedMusicResult(id string, songInfo store.SongInfo, track *provi
 	}
 }
 
-func (a *App) sendMusic(ctx context.Context, songInfo store.SongInfo, track *provider.Track, musicPath, picPath string, chatID int64, reply *models.ReplyParameters) (*models.Message, error) {
+// uploadStatusInterval 是上传进度刷新状态消息的间隔。
+var uploadStatusInterval = 5 * time.Second
+
+// watchUpload 在上传开始时显示进度，之后定期刷新。返回的 progress 交给上传使用；stop 停止
+// 刷新并等待进行中的编辑完成，之后才能写入其他状态。
+func (a *App) watchUpload(status func(string) error, songInfo store.SongInfo) (progress uploadProgress, stop func()) {
+	var sent, total atomic.Int64
+	var startOnce sync.Once
+	started, done, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(finished)
+		select {
+		case <-done:
+			return
+		case <-started:
+		}
+		ticker := time.NewTicker(uploadStatusInterval)
+		defer ticker.Stop()
+		last := sent.Load()
+		for {
+			s, t := sent.Load(), total.Load()
+			if s >= t {
+				a.showStatus(status, render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.UploadWaiting))
+				return
+			}
+			speed := float64(s-last) / uploadStatusInterval.Seconds()
+			a.showStatus(status, render.TransferWithInfo(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.UploadProgress, render.Speed(speed), s, t))
+			last = s
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	progress = func(s, t int64) {
+		sent.Store(s)
+		total.Store(t)
+		startOnce.Do(func() { close(started) })
+	}
+	return progress, func() {
+		close(done)
+		<-finished
+	}
+}
+
+func (a *App) sendMusic(ctx context.Context, songInfo store.SongInfo, track *provider.Track, musicPath, picPath string, chatID int64, reply *models.ReplyParameters, progress uploadProgress) (*models.Message, error) {
 	params := &tgb.SendAudioParams{
 		ChatID:          chatID,
 		Caption:         a.musicCaption(songInfo),
@@ -596,11 +643,13 @@ func (a *App) sendMusic(ctx context.Context, songInfo store.SongInfo, track *pro
 		ReplyParameters: reply,
 	}
 	if songInfo.FileID == "" {
-		_, _ = a.tg.SendChatAction(ctx, &tgb.SendChatActionParams{
-			ChatID: chatID,
-			Action: models.ChatActionUploadDocument,
-		})
-		return a.sendAudioFile(ctx, params, musicPath, picPath)
+		go func() {
+			_, _ = a.tg.SendChatAction(ctx, &tgb.SendChatActionParams{
+				ChatID: chatID,
+				Action: models.ChatActionUploadDocument,
+			})
+		}()
+		return a.sendAudioFile(ctx, params, musicPath, picPath, progress)
 	}
 	params.Audio = &models.InputFileString{Data: songInfo.FileID}
 	// Telegram 不接受以 file_id 复用缩略图，重发缓存歌曲时忽略 ThumbFileID

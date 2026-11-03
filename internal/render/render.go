@@ -30,6 +30,8 @@ const (
 	Downloading      = "下载中..."
 	Redownloading    = "下载失败，尝试重新下载中..."
 	Uploading        = "下载完成, 发送中..."
+	UploadProgress   = "上传中..."
+	UploadWaiting    = "上传完成, 等待 Telegram 处理..."
 	Md5VerFailed     = "MD5校验失败"
 	RetryLater       = "请稍后重试"
 	Reloading        = "将在当前任务完成后重新加载配置与插件"
@@ -179,17 +181,46 @@ func PluginUpdateFailedLine(displayName, name, reason string) string {
 
 func Escape(s string) string { return html.EscapeString(s) }
 
-func MusicStatus(name, album, ext string, sizeMB float64, suffix string) string {
-	return fmt.Sprintf("%s\n专辑: %s\n%s %.2fMB\n%s", Escape(name), Escape(album), Escape(ext), sizeMB, suffix)
+// musicHeader 是状态消息的歌曲信息部分；ext 未知时省略格式行。
+func musicHeader(name, album, ext string) string {
+	text := Escape(name) + "\n专辑: " + Escape(album) + "\n"
+	if ext != "" {
+		text += "格式: " + Escape(ext) + "\n"
+	}
+	return text
 }
 
-func DownloadStatus(speed string, writtenMB, totalMB float64, percent int64) string {
-	return fmt.Sprintf(" %s\n%.2fMB/%.2fMB %d%%", Escape(speed), writtenMB, totalMB, percent)
+func MusicStatus(name, album, ext, suffix string) string {
+	return musicHeader(name, album, ext) + suffix
 }
 
-func DownloadingWithInfo(name, album, speed string, writtenMB, totalMB float64, percent int64) string {
-	return fmt.Sprintf("%s\n专辑: %s\n%s%s", Escape(name), Escape(album), Downloading,
-		DownloadStatus(speed, writtenMB, totalMB, percent))
+const progressBarWidth = 20
+
+// TransferProgress 渲染等宽字体的进度条，调用方需保证 total > 0。
+func TransferProgress(speed string, written, total int64) string {
+	filled := min(int(written*progressBarWidth/total), progressBarWidth)
+	bar := strings.Repeat("=", filled)
+	if filled < progressBarWidth {
+		bar += ">" + strings.Repeat(" ", progressBarWidth-filled-1)
+	}
+	return fmt.Sprintf("<code>[%s] %3d%%</code>\n<code>%.2f/%.2f MB  %s</code>",
+		bar, written*100/total, float64(written)/1024/1024, float64(total)/1024/1024, Escape(speed))
+}
+
+// Speed 格式化传输速度，与下载进度的格式一致。
+func Speed(bytesPerSec float64) string {
+	kb := int64(bytesPerSec / 1024)
+	if kb > 1024 {
+		return fmt.Sprintf("%.2f MB/s", float64(kb)/1024)
+	}
+	if kb < 1 {
+		return "0 KB/s"
+	}
+	return fmt.Sprintf("%d KB/s", kb)
+}
+
+func TransferWithInfo(name, album, ext, state, speed string, written, total int64) string {
+	return MusicStatus(name, album, ext, state+"\n"+TransferProgress(speed, written, total))
 }
 
 func SongInfo(name, artists, album string) string {

@@ -25,10 +25,13 @@ type uploadFile struct {
 	path  string
 }
 
-// sendAudioFile 上传本地音频（及缩略图）。go-telegram/bot 会把整个请求体读进内存，
-// 上 GB 的无损文件会占用约两倍于文件的内存；这里只把表单字段放在内存里，
-// 文件内容在发送时从磁盘读取。
-func (a *App) sendAudioFile(ctx context.Context, params *tgb.SendAudioParams, audioPath, thumbPath string) (*models.Message, error) {
+// uploadProgress 在上传请求体被读出时回调，sent 为已发送字节数，total 为请求体总长度。
+// 由发送请求的 goroutine 调用，回调应尽快返回。
+type uploadProgress func(sent, total int64)
+
+// sendAudioFile 流式上传本地音频及缩略图，内存占用与文件大小无关
+// （go-telegram/bot 会把整个请求体读进内存）。progress 可为 nil。
+func (a *App) sendAudioFile(ctx context.Context, params *tgb.SendAudioParams, audioPath, thumbPath string, progress uploadProgress) (*models.Message, error) {
 	fields := *params
 	fields.Audio, fields.Thumbnail = nil, nil
 	files := []uploadFile{{field: "audio", path: audioPath}}
@@ -36,16 +39,15 @@ func (a *App) sendAudioFile(ctx context.Context, params *tgb.SendAudioParams, au
 		files = append(files, uploadFile{field: "thumbnail", path: thumbPath})
 	}
 	var msg models.Message
-	if err := a.uploadMultipart(ctx, "sendAudio", &fields, files, &msg); err != nil {
+	if err := a.uploadMultipart(ctx, "sendAudio", &fields, files, &msg, progress); err != nil {
 		return nil, err
 	}
 	return &msg, nil
 }
 
-// uploadMultipart 以 multipart 流式发送请求：先算出各部分长度并设置 Content-Length，
-// 文件内容不经内存缓冲。普通字段按 JSON 编码后写入：字符串原样，其余为 JSON 文本，
-// 与 go-telegram/bot 的表单编码一致。
-func (a *App) uploadMultipart(ctx context.Context, method string, params any, files []uploadFile, dest any) error {
+// uploadMultipart 流式发送 multipart 请求并设置准确的 Content-Length。普通字段的编码
+// 与 go-telegram/bot 一致：字符串原样写入，其余写 JSON 文本。
+func (a *App) uploadMultipart(ctx context.Context, method string, params any, files []uploadFile, dest any, progress uploadProgress) error {
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return err
@@ -110,7 +112,11 @@ func (a *App) uploadMultipart(ctx context.Context, method string, params any, fi
 
 	token := a.cfg.Bot.Token
 	endpoint := strings.TrimSuffix(a.cfg.Bot.APIURL, "/") + "/bot" + token + "/" + method
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, io.MultiReader(parts...))
+	var body io.Reader = io.MultiReader(parts...)
+	if progress != nil {
+		body = &progressReader{r: body, total: size, progress: progress}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return fmt.Errorf("error create request for method %s: %w", method, redactToken(err, token))
 	}
@@ -122,11 +128,27 @@ func (a *App) uploadMultipart(ctx context.Context, method string, params any, fi
 		return fmt.Errorf("error do request for method %s, %w", method, redactToken(err, token))
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("error read response body for method %s, %w", method, err)
 	}
-	return decodeAPIResponse(method, body, dest)
+	return decodeAPIResponse(method, respBody, dest)
+}
+
+type progressReader struct {
+	r        io.Reader
+	sent     int64
+	total    int64
+	progress uploadProgress
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.sent += int64(n)
+		p.progress(p.sent, p.total)
+	}
+	return n, err
 }
 
 // decodeAPIResponse 解析 Bot API 响应，错误与 go-telegram/bot 使用相同的错误类型。

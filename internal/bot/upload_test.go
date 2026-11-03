@@ -10,12 +10,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tgb "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/config"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/render"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
 )
 
 type capturedForm struct {
@@ -95,7 +99,7 @@ func TestSendAudioFileMatchesLibrary(t *testing.T) {
 	af.Close()
 	tf.Close()
 
-	msg, err := uploadTestApp(srv.URL).sendAudioFile(context.Background(), params(), audio, thumb)
+	msg, err := uploadTestApp(srv.URL).sendAudioFile(context.Background(), params(), audio, thumb, nil)
 	if err != nil || msg.ID != 7 {
 		t.Fatalf("msg = %+v, err = %v", msg, err)
 	}
@@ -129,7 +133,7 @@ func TestUploadErrors(t *testing.T) {
 		srv, _ := captureServer(t, c.resp)
 		path := filepath.Join(t.TempDir(), "a.mp3")
 		_ = os.WriteFile(path, []byte("x"), 0o644)
-		_, err := uploadTestApp(srv.URL).sendAudioFile(context.Background(), &tgb.SendAudioParams{ChatID: int64(1)}, path, "")
+		_, err := uploadTestApp(srv.URL).sendAudioFile(context.Background(), &tgb.SendAudioParams{ChatID: int64(1)}, path, "", nil)
 		if err == nil || !c.check(err) {
 			t.Errorf("响应 %s 得到 err = %v", c.resp, err)
 		}
@@ -140,8 +144,89 @@ func TestUploadErrors(t *testing.T) {
 	srv.Close()
 	path := filepath.Join(t.TempDir(), "a.mp3")
 	_ = os.WriteFile(path, []byte("x"), 0o644)
-	_, err := uploadTestApp(srv.URL).sendAudioFile(context.Background(), &tgb.SendAudioParams{ChatID: int64(1)}, path, "")
+	_, err := uploadTestApp(srv.URL).sendAudioFile(context.Background(), &tgb.SendAudioParams{ChatID: int64(1)}, path, "", nil)
 	if err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Errorf("err = %v，不应包含 token", err)
+	}
+}
+
+func TestUploadProgress(t *testing.T) {
+	srv, forms := captureServer(t, `{"ok":true,"result":{"message_id":1,"date":0,"chat":{"id":1,"type":"private"}}}`)
+	path := filepath.Join(t.TempDir(), "a.flac")
+	_ = os.WriteFile(path, make([]byte, 256<<10), 0o644)
+	var last, total int64
+	calls := 0
+	_, err := uploadTestApp(srv.URL).sendAudioFile(context.Background(), &tgb.SendAudioParams{ChatID: int64(1)}, path, "", func(s, tot int64) {
+		if s < last {
+			t.Errorf("进度回退: %d -> %d", last, s)
+		}
+		last, total = s, tot
+		calls++
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls < 2 || last != total || total != (*forms)[0].bodyLen {
+		t.Errorf("calls = %d, sent = %d, total = %d, body = %d", calls, last, total, (*forms)[0].bodyLen)
+	}
+}
+
+func TestWatchUpload(t *testing.T) {
+	old := uploadStatusInterval
+	uploadStatusInterval = 20 * time.Millisecond
+	defer func() { uploadStatusInterval = old }()
+
+	var mu sync.Mutex
+	var texts []string
+	status := func(s string) error {
+		mu.Lock()
+		texts = append(texts, s)
+		mu.Unlock()
+		return nil
+	}
+	a := &App{}
+	progress, stop := a.watchUpload(status, store.SongInfo{SongName: "晴天", FileExt: "flac"})
+	progress(10<<20, 40<<20)
+	time.Sleep(50 * time.Millisecond)
+	progress(40<<20, 40<<20)
+	time.Sleep(100 * time.Millisecond)
+	stop()
+	n := len(texts)
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(texts) != n {
+		t.Error("stop 之后仍在更新状态")
+	}
+	joined := strings.Join(texts, "\n---\n")
+	if !strings.Contains(joined, render.UploadProgress) || !strings.Contains(joined, "[=====>              ]  25%</code>\n<code>10.00/40.00 MB") {
+		t.Errorf("缺少上传进度: %s", joined)
+	}
+	if strings.Count(joined, render.UploadWaiting) != 1 || !strings.HasSuffix(texts[len(texts)-1], render.UploadWaiting) {
+		t.Errorf("上传完成后应只提示一次等待处理: %s", joined)
+	}
+}
+
+func TestWatchUploadShowsFirstFrameImmediately(t *testing.T) {
+	old := uploadStatusInterval
+	uploadStatusInterval = time.Hour
+	defer func() { uploadStatusInterval = old }()
+
+	shown := make(chan string, 1)
+	a := &App{}
+	progress, stop := a.watchUpload(func(s string) error {
+		shown <- s
+		return nil
+	}, store.SongInfo{SongName: "散歩道"})
+	defer stop()
+	progress(0, 40<<20)
+	select {
+	case s := <-shown:
+		if !strings.Contains(s, "  0%") {
+			t.Errorf("首帧应为 0%%: %s", s)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("开始上传后未立即显示进度")
 	}
 }
