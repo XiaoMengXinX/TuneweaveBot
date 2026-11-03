@@ -42,3 +42,6 @@ plugins/*.wasm
 plugins/.secret.key
 plugins/example/example
 plugins/netease/netease
+
+# macOS
+.DS_Store
