@@ -3,6 +3,7 @@ package plugin
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -396,9 +397,13 @@ func (r *Runtime) instantiate(ctx context.Context, p *Plugin, pluginName string,
 		allowPrivate: r.cfg.AllowPrivateNetworks,
 	}
 	r.states.Store(name, state)
+	// wazero 默认的时钟与随机源都是固定的假值，插件要靠真实时间判断 token 是否过期
 	modCfg := wazero.NewModuleConfig().
 		WithName(name).
-		WithStartFunctions("_initialize")
+		WithStartFunctions("_initialize").
+		WithSysWalltime().
+		WithSysNanotime().
+		WithRandSource(rand.Reader)
 	fsCfg := wazero.NewFSConfig().WithDirMount(r.cfg.ScratchDir, ScratchMount)
 	if r.cfg.FSDir != "" {
 		fsCfg = fsCfg.WithReadOnlyDirMount(r.cfg.FSDir, "/")
