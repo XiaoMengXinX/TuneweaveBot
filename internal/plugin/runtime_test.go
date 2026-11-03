@@ -1,6 +1,10 @@
 package plugin
 
 import (
+	"context"
+	"strings"
+
+	"github.com/sirupsen/logrus"
 	"testing"
 )
 
@@ -36,5 +40,23 @@ func TestPluginNameHint(t *testing.T) {
 		if got := pluginNameHint(path); got != want {
 			t.Errorf("pluginNameHint(%q) = %q, want %q", path, got, want)
 		}
+	}
+}
+
+// 连接失败时只回传底层原因：插件的 http.Client 会再加上方法与地址，避免重复。
+func TestHTTPRequestErrorOmitsURL(t *testing.T) {
+	s := &instanceState{
+		plugin:       "demo",
+		allowedHosts: []string{"127.0.0.1"},
+		maxHTTPBytes: 1 << 20,
+		httpClient:   pluginHTTPClient(nil, true),
+		log:          logrus.New(),
+	}
+	_, err := s.httpRequest(context.Background(), hostHTTPRequest{Method: "GET", URL: "http://127.0.0.1:1/path"})
+	if err == nil {
+		t.Fatal("连接被拒绝时应报错")
+	}
+	if strings.Contains(err.Error(), "127.0.0.1:1/path") || strings.Contains(err.Error(), "GET") {
+		t.Errorf("err = %q，不应包含方法与地址", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -293,6 +294,10 @@ func (s *instanceState) httpRequest(ctx context.Context, in hostHTTPRequest) (*h
 	resp, err := client.Do(req)
 	if err != nil {
 		s.logDebug("HTTP %s %s 失败，耗时 %s: %v", req.Method, logURL(u), time.Since(start).Round(time.Millisecond), err)
+		// 插件的 http.Client 会再加上方法与地址，这里只回传底层原因
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			return nil, ue.Err
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
