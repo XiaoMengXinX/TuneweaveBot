@@ -43,7 +43,7 @@ func TestPluginNameHint(t *testing.T) {
 	}
 }
 
-// 连接失败时只回传底层原因：插件的 http.Client 会再加上方法与地址，避免重复。
+// 连接失败时只回传底层原因，方法与地址由插件的 http.Client 添加。
 func TestHTTPRequestErrorOmitsURL(t *testing.T) {
 	s := &instanceState{
 		plugin:       "demo",

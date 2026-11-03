@@ -67,7 +67,7 @@ func ResizeCover(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 封面来自插件，限制文件大小与像素数，避免解压炸弹；用 LimitReader 而非先全量读入
+	// 封面来自插件，限制文件大小与像素数，防止解压炸弹
 	buffer, err := io.ReadAll(io.LimitReader(file, maxCoverBytes+1))
 	closeErr := file.Close()
 	if err != nil {
