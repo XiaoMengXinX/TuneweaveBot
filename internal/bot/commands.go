@@ -13,7 +13,7 @@ func (a *App) setupCommands(ctx context.Context, tg *tgb.Bot) {
 		{Command: "music", Description: "点歌（ID 或关键词）"},
 		{Command: "search", Description: "搜索歌曲（可指定 provider）"},
 		{Command: "lyric", Description: "获取歌词"},
-		{Command: "recognize", Description: "语音识别搜歌"},
+		{Command: "recognize", Description: "听歌识曲"},
 		{Command: "status", Description: "缓存与插件状态"},
 		{Command: "about", Description: "关于本 bot"},
 		{Command: "help", Description: "使用帮助"},

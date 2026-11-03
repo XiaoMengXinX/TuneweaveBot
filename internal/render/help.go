@@ -45,8 +45,8 @@ func Help(sources []HelpSource, commands []HelpCommand, botUsername string) stri
 	b.WriteString("\n<b>📝 歌词</b>\n")
 	line("/lyric [来源] <ID/关键词>", "发送歌词文件；也可回复含分享链接的消息")
 
-	b.WriteString("\n<b>🎤 识曲</b>\n")
-	line("/recognize", "回复一条语音，识别其中的歌曲")
+	b.WriteString("\n<b>🎤 听歌识曲</b>\n")
+	line("/recognize", "回复一段含音乐的语音，识别是哪首歌")
 
 	if len(commands) > 0 {
 		b.WriteString("\n<b>🧩 插件命令</b>\n")

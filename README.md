@@ -106,7 +106,7 @@ TuneweaveBot 数据库。缓存的 file_id 只对上传它的 bot 有效，请�
 | `/music [provider] <ID/关键词>` | 点歌，如 `/music netease 晴天`；直接发送分享链接也可 |
 | `/search [provider] <关键词>` | 搜索并翻页（最多 5 页），按钮仅搜索者 10 分钟内可用 |
 | `/lyric [provider] <ID/关键词>` | 发送歌词文件；也可回复含分享链接的消息 |
-| `/recognize` | 回复一条语音，识别歌曲 |
+| `/recognize` | 听歌识曲：回复一段含音乐的语音，识别是哪首歌 |
 | `/help` | 列出全部命令、插件命令与可用来源 |
 | `/status` · `/about` | 缓存与插件状态 · 版本与已装插件 |
 | `/netease` · `/program` | 网易云插件声明的命令，按 ID 或关键词点歌 · 按节目 ID 点歌 |
