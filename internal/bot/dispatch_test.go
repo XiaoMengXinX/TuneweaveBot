@@ -30,11 +30,15 @@ func newTestBot(t *testing.T) (*tgb.Bot, *requestRecorder) {
 	t.Cleanup(srv.Close)
 
 	tg, err := tgb.New("1:test", tgb.WithServerURL(srv.URL), tgb.WithSkipGetMe(), tgb.WithNotAsyncHandlers())
+	testBotURLs.Store(tg, srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return tg, rec
 }
+
+// testBotURLs 记录假 Bot API 的地址，供 newTestApp 配置不经过 tgb 的流式上传。
+var testBotURLs sync.Map
 
 type requestRecorder struct {
 	mu     sync.Mutex
@@ -66,6 +70,10 @@ func (r *requestRecorder) has(prefix string) bool {
 func newTestApp(tg *tgb.Bot) *App {
 	cfg := config.Default()
 	cfg.Bot.Admin = []int64{42}
+	cfg.Bot.Token = "1:test"
+	if u, ok := testBotURLs.Load(tg); ok {
+		cfg.Bot.APIURL = u.(string)
+	}
 	log := logrus.New()
 	log.SetLevel(logrus.PanicLevel)
 	registry, err := provider.NewRegistry(fakeProviderName, newFakeProvider())
@@ -73,13 +81,14 @@ func newTestApp(tg *tgb.Bot) *App {
 		panic(err)
 	}
 	return &App{
-		cfg:       cfg,
-		tg:        tg,
-		me:        &models.User{ID: 1, Username: "testbot"},
-		usernames: []string{"testbot"},
-		log:       log,
-		providers: registry,
-		auth:      auth.New(fakeAuthenticator{name: fakeProviderName}),
+		cfg:          cfg,
+		tg:           tg,
+		me:           &models.User{ID: 1, Username: "testbot"},
+		usernames:    []string{"testbot"},
+		uploadClient: http.DefaultClient,
+		log:          log,
+		providers:    registry,
+		auth:         auth.New(fakeAuthenticator{name: fakeProviderName}),
 	}
 }
 
@@ -254,6 +263,7 @@ func TestBotUsernames(t *testing.T) {
 			_, _ = w.Write([]byte(c.resp))
 		}))
 		tg, err := tgb.New("1:test", tgb.WithServerURL(srv.URL), tgb.WithSkipGetMe())
+		testBotURLs.Store(tg, srv.URL)
 		if err != nil {
 			t.Fatal(err)
 		}

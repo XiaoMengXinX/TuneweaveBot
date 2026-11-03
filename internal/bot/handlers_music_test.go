@@ -115,6 +115,7 @@ func TestProcessCachedProgramKeyboard(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	tg, err := tgb.New("1:test", tgb.WithServerURL(srv.URL), tgb.WithSkipGetMe())
+	testBotURLs.Store(tg, srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -590,20 +590,14 @@ func (a *App) sendMusic(ctx context.Context, songInfo store.SongInfo, track *pro
 		ReplyMarkup:     musicKeyboard(songInfo, track),
 		ReplyParameters: reply,
 	}
-	if songInfo.FileID != "" {
-		params.Audio = &models.InputFileString{Data: songInfo.FileID}
-	} else {
-		file, err := os.Open(musicPath)
-		if err != nil {
-			return nil, err
-		}
-		defer file.Close()
-		params.Audio = &models.InputFileUpload{Filename: filepath.Base(musicPath), Data: file}
+	if songInfo.FileID == "" {
 		_, _ = a.tg.SendChatAction(ctx, &tgb.SendChatActionParams{
 			ChatID: chatID,
 			Action: models.ChatActionUploadDocument,
 		})
+		return a.sendAudioFile(ctx, params, musicPath, picPath)
 	}
+	params.Audio = &models.InputFileString{Data: songInfo.FileID}
 	// Telegram 不接受以 file_id 复用缩略图，重发缓存歌曲时忽略 ThumbFileID
 	if picPath != "" {
 		picFile, err := os.Open(picPath)

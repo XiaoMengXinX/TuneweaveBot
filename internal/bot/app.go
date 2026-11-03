@@ -68,6 +68,7 @@ type App struct {
 	warnMu        sync.Mutex                    // 保护 warnCancels
 	warnCancels   map[string]context.CancelFunc // provider -> 告警循环取消函数
 	usernames     []string                      // bot 的全部有效用户名，主用户名在前
+	uploadClient  *http.Client                  // 流式上传音频用，超时同 [bot] upload_timeout
 	reload        context.CancelCauseFunc       // 停止接收新消息并触发重载
 	workCtx       context.Context               // handler 使用的 context，重载时不取消，进程退出时取消
 	updateMu      sync.Mutex                    // 保护 updateOffers
@@ -125,6 +126,7 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 		statusSem:    semaphore.NewWeighted(1),
 		warnCancels:  map[string]context.CancelFunc{},
 		tokenWaiters: map[surfaceKey]chan string{},
+		uploadClient: &http.Client{Timeout: cfg.Bot.UploadTimeout.D()},
 		reload:       stopPolling,
 		workCtx:      runCtx,
 		updateOffers: map[string]updateOffer{},

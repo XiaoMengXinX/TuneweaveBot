@@ -34,6 +34,7 @@ func TestLyricFromReplyButton(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	tg, err := tgb.New("1:test", tgb.WithServerURL(srv.URL), tgb.WithSkipGetMe(), tgb.WithNotAsyncHandlers())
+	testBotURLs.Store(tg, srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +99,7 @@ func TestLyricRejectsProgram(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 			tg, err := tgb.New("1:test", tgb.WithServerURL(srv.URL), tgb.WithSkipGetMe(), tgb.WithNotAsyncHandlers())
+			testBotURLs.Store(tg, srv.URL)
 			if err != nil {
 				t.Fatal(err)
 			}
