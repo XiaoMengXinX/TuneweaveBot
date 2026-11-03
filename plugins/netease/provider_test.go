@@ -113,7 +113,7 @@ func TestResolveNoAudio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.NoAudio == nil || result.NoAudio.Code != 404 || result.NoAudio.Fee != 1 {
+	if result.NoAudio == nil || result.NoAudio.Code != 404 || result.NoAudio.Fee != 1 || result.NoAudio.Reason != "需要网易云黑胶 VIP" {
 		t.Fatalf("no_audio = %+v", result.NoAudio)
 	}
 	if result.Track == nil || result.Track.Title != "Song" || result.Track.AudioURL != "" {
@@ -147,7 +147,7 @@ func TestResolveProgramEnrich(t *testing.T) {
 		t.Fatal(err)
 	}
 	track := result.Track
-	if track.Album != "Radio" || track.CoverURL != "https://p1.music.126.net/cover.jpg" {
+	if track.Album != "Radio" || track.CoverURL != "https://p1.music.126.net/cover.jpg?param=1000y1000" {
 		t.Errorf("program enrich missing: album=%q cover=%q", track.Album, track.CoverURL)
 	}
 	if len(track.Artists) != 1 || track.Artists[0] != "DJ A" {
@@ -185,5 +185,34 @@ func TestLyrics(t *testing.T) {
 	}
 	if _, err := lyrics(Ref{ID: "1", Sub: "program"}); err == nil {
 		t.Error("program lyrics should fail")
+	}
+}
+
+func TestNoAudioReason(t *testing.T) {
+	for _, c := range []struct {
+		code, fee int
+		want      string
+	}{
+		{404, 0, "无版权或已下架"},
+		{-110, 4, "需要单独购买专辑"},
+		{-110, 1, "需要网易云黑胶 VIP"},
+		{-460, 0, "网易云未提供下载地址（code -460）"},
+	} {
+		if got := noAudioReason(c.code, c.fee); got != c.want {
+			t.Errorf("noAudioReason(%d, %d) = %q, want %q", c.code, c.fee, got, c.want)
+		}
+	}
+}
+
+func TestCoverURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                               "",
+		"https://p1/a.jpg":               "https://p1/a.jpg?param=1000y1000",
+		"https://p1/a.jpg?x=1":           "https://p1/a.jpg?x=1&param=1000y1000",
+		"https://p1/a.jpg?param=300y300": "https://p1/a.jpg?param=300y300",
+	} {
+		if got := coverURL(in); got != want {
+			t.Errorf("coverURL(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

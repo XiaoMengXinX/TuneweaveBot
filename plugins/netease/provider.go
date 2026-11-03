@@ -96,8 +96,37 @@ type resolveResult struct {
 }
 
 type NoAudio struct {
-	Code int `json:"code"`
-	Fee  int `json:"fee"`
+	Code   int    `json:"code"`
+	Fee    int    `json:"fee"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// noAudioReason 把网易云 song/url 的 code 与 fee 转成给用户看的原因。
+func noAudioReason(code, fee int) string {
+	switch fee {
+	case 1:
+		return "需要网易云黑胶 VIP"
+	case 4:
+		return "需要单独购买专辑"
+	}
+	if code == 404 {
+		return "无版权或已下架"
+	}
+	return fmt.Sprintf("网易云未提供下载地址（code %d）", code)
+}
+
+// coverSize 是封面请求的边长上限：网易云原图可达数千像素，CDN 按 param 缩小（不放大）。
+const coverSize = "1000y1000"
+
+func coverURL(pic string) string {
+	if pic == "" || strings.Contains(pic, "param=") {
+		return pic
+	}
+	sep := "?"
+	if strings.Contains(pic, "?") {
+		sep = "&"
+	}
+	return pic + sep + "param=" + coverSize
 }
 
 func resolve(ref Ref) (*resolveResult, error) {
@@ -136,7 +165,7 @@ func trackFromSong(ref Ref, song types.SongDetailData, urlData types.SongsURLDat
 		Artists:      artistNames(song),
 		Album:        song.Al.Name,
 		DurationMS:   song.Dt,
-		CoverURL:     song.Al.PicUrl,
+		CoverURL:     coverURL(song.Al.PicUrl),
 		PageURL:      songPageURL(song.Id),
 		ShareText:    songURL(song.Id),
 		ProviderName: displayName,
@@ -161,7 +190,7 @@ func trackFromSong(ref Ref, song types.SongDetailData, urlData types.SongsURLDat
 		if len(urlData.Data) != 0 {
 			code, fee = urlData.Data[0].Code, urlData.Data[0].Fee
 		}
-		return track, &NoAudio{Code: code, Fee: fee}
+		return track, &NoAudio{Code: code, Fee: fee, Reason: noAudioReason(code, fee)}
 	}
 	track.AudioURL = url.Url
 	track.Size = int64(url.Size)
