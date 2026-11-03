@@ -25,11 +25,7 @@ jobs:
         run: go test ./...
       - name: Test pluginsdk
         run: cd pluginsdk && go test ./...
-      - name: Test plugins
-        run: cd plugins/netease && go test ./...
       - name: Build
-        env:
-          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/plugin
         run: |
           sudo timedatectl set-timezone Asia/Shanghai
           VERSION=${GITHUB_REF_NAME}
@@ -52,12 +48,9 @@ jobs:
             CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags "${LDFlags}" \
               -o "dist/TuneweaveBot_${GOOS}_${GOARCH}${suffix}" ./cmd/tuneweavebot
           done
-          bash build-plugins.sh
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/*
-            dist/plugins/*.wasm.gz
+          files: dist/*
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
