@@ -16,6 +16,7 @@ services:
       - ./data:/app/data
       - ./cache:/app/cache
       - ./log:/app/log
+      - ./plugins:/app/plugins
     depends_on:
       bot-api:
         condition: service_started

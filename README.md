@@ -29,11 +29,14 @@
 
 ```sh
 cp config_example.toml config.toml   # 填写 [bot] token 与 admin
-mkdir -p data
+mkdir -p data plugins
+curl -L -o plugins/netease.wasm.gz \
+  https://github.com/XiaoMengXinX/TuneweaveBot/releases/download/plugin/netease.wasm.gz
 docker compose up -d
 ```
 
-镜像已内置插件。`data/` 保存数据库与登录凭据，请持久化挂载。`docker-compose.yml` 附带自建
+镜像不含插件：插件放在挂载的 `plugins/` 中，`/checkupdate` 更新后的插件也写在这里。`data/`
+保存数据库与登录凭据。两者都请持久化挂载。`docker-compose.yml` 附带自建
 Bot API 服务：使用时填写其中的 `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`，并把 `[bot] api_url`
 设为 `http://bot-api:8081`；不需要可删除该服务。
 

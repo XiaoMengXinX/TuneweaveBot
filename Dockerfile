@@ -2,14 +2,14 @@ FROM golang:1.26-alpine AS builder
 
 WORKDIR /build
 
-RUN apk add --no-cache git gzip
+RUN apk add --no-cache git
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN (cd pluginsdk && go mod download) && (cd plugins/netease && go mod download)
-RUN sh build.sh
+# 插件不打进镜像：从 plugin release 下载到挂载的 /app/plugins，才能通过 /checkupdate 更新
+RUN SKIP_PLUGINS=1 sh build.sh
 
 FROM alpine:3.21
 
@@ -19,6 +19,5 @@ RUN apk add --no-cache ca-certificates tzdata \
 WORKDIR /app
 
 COPY --from=builder /build/TuneweaveBot .
-COPY --from=builder /build/dist/plugins/ /app/plugins/
 
 CMD [ "./TuneweaveBot" ]
