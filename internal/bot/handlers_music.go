@@ -281,6 +281,11 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 					onInfo(songInfo)
 				}
 			}
+			if errors.Is(err, provider.ErrAuthRequired) {
+				a.pauseDownloads(ctx, ref.Provider)
+				a.showStatus(status, render.CookieExpired(a.providerDisplay(ref.Provider)))
+				return songInfo, err
+			}
 			var noAudio *provider.NoAudioError
 			if errors.As(err, &noAudio) {
 				a.showStatus(status, render.NoAudio(noAudio.Reason))

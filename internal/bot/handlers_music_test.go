@@ -3,18 +3,24 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	tgb "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"golang.org/x/sync/semaphore"
 	"gorm.io/gorm/logger"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/provider"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/render"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
 )
 
@@ -155,5 +161,60 @@ func TestProcessCachedProgramKeyboard(t *testing.T) {
 		if got := *keyboards[i].InlineKeyboard[1][0].SwitchInlineQuery; got != "https://music.163.com/song?id=123" {
 			t.Errorf("inline query = %q, want song link", got)
 		}
+	}
+}
+
+func TestResolveAuthRequiredPausesDownloads(t *testing.T) {
+	var mu sync.Mutex
+	var sent, edited []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseMultipartForm(1 << 20)
+		mu.Lock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/sendMessage"):
+			sent = append(sent, r.FormValue("text"))
+		case strings.HasSuffix(r.URL.Path, "/editMessageText"):
+			edited = append(edited, r.FormValue("text"))
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":10,"chat":{"id":42,"type":"private"}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	tg, err := tgb.New("1:test", tgb.WithServerURL(srv.URL), tgb.WithSkipGetMe())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testBotURLs.Store(tg, srv.URL)
+	a := newTestApp(tg)
+	a.warnCancels = map[string]context.CancelFunc{}
+	a.musicSem = semaphore.NewWeighted(1)
+	p := newFakeProvider()
+	p.resolveFn = func(context.Context, provider.Ref) (*provider.Track, error) {
+		return nil, fmt.Errorf("%w: sp_dc 已失效", provider.ErrAuthRequired)
+	}
+	setTestProvider(t, a, p)
+	a.auth.SetAvailable(fakeProviderName, true)
+	st, err := store.Open(filepath.Join(t.TempDir(), "cache.db"), logger.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	a.store = st
+
+	err = a.processMusic(t.Context(), provider.Ref{Provider: fakeProviderName, ID: "123"}, &models.Message{ID: 1, Chat: models.Chat{ID: 42}}, nil)
+	if !errors.Is(err, provider.ErrAuthRequired) {
+		t.Fatalf("err = %v", err)
+	}
+	if a.auth.Available(fakeProviderName) {
+		t.Error("凭据失效后应暂停下载")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := render.CookieExpiredAdminWarn(fakeProviderDisplay, fakeProviderName); !slices.Contains(sent, want) {
+		t.Errorf("未通知管理员: %q", sent)
+	}
+	if want := render.CookieExpired(fakeProviderDisplay); len(edited) == 0 || edited[len(edited)-1] != want {
+		t.Errorf("状态消息 = %q, want %q", edited, want)
 	}
 }
