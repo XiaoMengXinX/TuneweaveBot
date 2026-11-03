@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	cookieCheckInterval = 10 * time.Minute
-	cookieWarnInterval  = 10 * time.Minute
+	cookieCheckInterval = 30 * time.Minute
+	cookieWarnInterval  = 2 * time.Hour
 )
 
 func (a *App) watchCookie(ctx context.Context) {

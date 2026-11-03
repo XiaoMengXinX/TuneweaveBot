@@ -280,8 +280,8 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 （`auth.begin` 会收到 `{mode:"token"}`）。一个插件可同时支持多种方式：按 `mode`
 在 `auth.begin` 里返回不同的 `type`。
 
-- `auth.status` → `{authenticated, account}`：宿主启动时与每 10 分钟各查一次；返回
-  未登录会暂停该 provider 的下载并每 10 分钟提醒管理员，直到恢复。网络错误不算失效。
+- `auth.status` → `{authenticated, account}`：宿主启动时与每 30 分钟各查一次；返回
+  未登录会暂停该 provider 的下载并每 2 小时提醒管理员，直到恢复。网络错误不算失效。
 - `auth.poll`（qr/link）→ `{state}`：`waiting`/`scanned`/`success`/`expired`。
 - `auth.submit`（token）→ 同 `auth.poll` 的结果结构；token 无效返回 `expired`。
 - 成功时返回 `credential`（宿主广播给池内所有实例）、可选 `nickname`，以及可选
