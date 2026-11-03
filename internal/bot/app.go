@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,6 +67,7 @@ type App struct {
 	cacheChat     atomic.Int64                  // 0 表示未设置缓存群
 	warnMu        sync.Mutex                    // 保护 warnCancels
 	warnCancels   map[string]context.CancelFunc // provider -> 告警循环取消函数
+	usernames     []string                      // bot 的全部有效用户名，主用户名在前
 	reload        context.CancelCauseFunc       // 停止接收新消息并触发重载
 	workCtx       context.Context               // handler 使用的 context，重载时不取消，进程退出时取消
 	updateMu      sync.Mutex                    // 保护 updateOffers
@@ -164,7 +166,8 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 		return false, err
 	}
 	a.me = me
-	log.Printf("%s 验证成功", me.Username)
+	a.usernames = botUsernames(runCtx, tg, me)
+	log.Printf("%s 验证成功，用户名: @%s", me.Username, strings.Join(a.usernames, ", @"))
 
 	a.registerHandlers(tg)
 	a.setupCommands(runCtx, tg)
@@ -260,10 +263,27 @@ func (a *App) registerHandlers(tg *tgb.Bot) {
 }
 
 func (a *App) command(tg *tgb.Bot, name string, h tgb.HandlerFunc, m ...tgb.Middleware) {
-	tg.RegisterHandlerMatchFunc(matchCommand(name, a.me.Username), h, m...)
+	tg.RegisterHandlerMatchFunc(matchCommand(name, a.usernames), h, m...)
 }
 
-func matchCommand(name, botUsername string) tgb.MatchFunc {
+// botUsernames 返回 bot 的全部有效用户名（主用户名在前）。getMe 只给出主用户名，
+// 通过 Fragment 获得的其他用户名只在 getChat 的 active_usernames 中；获取失败时只用主用户名。
+func botUsernames(ctx context.Context, tg *tgb.Bot, me *models.User) []string {
+	names := []string{me.Username}
+	chat, err := tg.GetChat(ctx, &tgb.GetChatParams{ChatID: me.ID})
+	if err != nil {
+		return names
+	}
+	for _, u := range chat.ActiveUsernames {
+		if !slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, u) }) {
+			names = append(names, u)
+		}
+	}
+	return names
+}
+
+// matchCommand 匹配 /name 或 /name@用户名；用户名可以是 bot 的任一有效用户名，不区分大小写。
+func matchCommand(name string, usernames []string) tgb.MatchFunc {
 	return func(update *models.Update) bool {
 		msg := update.Message
 		if msg == nil || len(msg.Entities) == 0 {
@@ -275,7 +295,8 @@ func matchCommand(name, botUsername string) tgb.MatchFunc {
 		}
 		cmd := msg.Text[1:e.Length]
 		if i := strings.IndexByte(cmd, '@'); i >= 0 {
-			return cmd[:i] == name && cmd[i+1:] == botUsername
+			target := cmd[i+1:]
+			return cmd[:i] == name && slices.ContainsFunc(usernames, func(u string) bool { return strings.EqualFold(u, target) })
 		}
 		return cmd == name
 	}
