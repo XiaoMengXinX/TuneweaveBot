@@ -19,6 +19,7 @@ func TestExpectedErrorHook(t *testing.T) {
 		{msg: "bad request, Bad Request: message to delete not found", want: "level=warning"},
 		{msg: "too many requests, Too Many Requests: retry after 8: retry_after 8", want: "level=warning"},
 		{msg: "bad request, Bad Request: can't parse entities", want: "level=error"},
+		{msg: "歌曲无可用音源: netease 1, no audio url: 无版权或已下架 (code 404, fee 0)", want: "level=info"},
 	} {
 		var buf bytes.Buffer
 		log := logrus.New()

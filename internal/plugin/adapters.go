@@ -48,15 +48,16 @@ func (a *ProviderAdapter) Resolve(ctx context.Context, ref provider.Ref) (*provi
 	var out struct {
 		Track   *provider.Track `json:"track"`
 		NoAudio *struct {
-			Code int `json:"code"`
-			Fee  int `json:"fee"`
+			Code   int    `json:"code"`
+			Fee    int    `json:"fee"`
+			Reason string `json:"reason"`
 		} `json:"no_audio"`
 	}
 	if err := a.plugin.call(ctx, "provider.resolve", map[string]any{"ref": ref}, &out); err != nil {
 		return out.Track, err
 	}
 	if out.NoAudio != nil {
-		return out.Track, &provider.NoAudioError{Code: out.NoAudio.Code, Fee: out.NoAudio.Fee}
+		return out.Track, &provider.NoAudioError{Code: out.NoAudio.Code, Fee: out.NoAudio.Fee, Reason: out.NoAudio.Reason}
 	}
 	return out.Track, nil
 }

@@ -17,11 +17,15 @@ var (
 
 // NoAudioError 表示歌曲存在但当前账号/地区无法获取下载地址。
 type NoAudioError struct {
-	Code int
-	Fee  int
+	Code   int
+	Fee    int
+	Reason string // 插件给出的原因，可直接展示给用户
 }
 
 func (e *NoAudioError) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("no audio url: %s (code %d, fee %d)", e.Reason, e.Code, e.Fee)
+	}
 	return fmt.Sprintf("no audio url (code %d, fee %d)", e.Code, e.Fee)
 }
 

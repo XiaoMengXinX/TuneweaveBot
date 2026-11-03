@@ -23,6 +23,7 @@ const (
 	GetLrcFailed     = "获取歌词失败, 歌曲可能不存在或为纯音乐"
 	LrcNoProgram     = "电台节目不支持获取歌词"
 	GetURLFailed     = "获取歌曲下载链接失败"
+	NoAudioLog       = "歌曲无可用音源"
 	FetchInfo        = "正在获取歌曲信息..."
 	FetchInfoFailed  = "获取歌曲信息失败"
 	WaitForDown      = "等待下载中..."
@@ -81,6 +82,14 @@ const (
 	CacheChatUnreachable = "无法向该聊天发送消息，请确认 bot 已加入并可以发言"
 	CacheChatDisabled    = "已关闭缓存群"
 )
+
+// NoAudio 是歌曲无法下载时给用户的提示，reason 为插件给出的原因。
+func NoAudio(reason string) string {
+	if reason == "" {
+		return GetURLFailed
+	}
+	return "无法获取这首歌：" + Escape(reason)
+}
 
 func CookieExpired(provider string) string {
 	return Escape(provider) + " 登录已失效，请联系 bot 管理员"

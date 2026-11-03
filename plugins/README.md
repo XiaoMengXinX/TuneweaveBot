@@ -171,7 +171,8 @@ host 函数**不回调插件的 `alloc`**，响应缓冲区由插件预先分配
 - `provider.match`：**在每条消息上调用**，只做本地解析（识别链接/ID），不得做重网络
   请求（短链跳转除外）。无法识别时返回 `{ref:null}`。
 - `provider.canonicalize`：把节目、电台等子资源归一成可缓存的歌曲 `ref`。
-- `provider.resolve`：返回元数据与可下载音频；没有音频时在 track 里用 `no_audio` 标记。
+- `provider.resolve`：返回元数据与可下载音频；没有音频时同时返回 `no_audio: {code, fee, reason}`，
+  `reason` 是给用户看的原因（如“无版权或已下架”），宿主原样展示，空时显示通用提示。
 - `provider.metadata`：只返回展示用元数据（Guest Mode 等场景）。未实现时宿主回退到
   `provider.resolve`；resolve 代价高（如需下载解密）的插件应当实现它。
 

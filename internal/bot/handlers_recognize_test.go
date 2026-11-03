@@ -157,13 +157,15 @@ func TestProcessMusicCachedInfo(t *testing.T) {
 
 func TestProcessMusicInfoWithoutURL(t *testing.T) {
 	for _, tt := range []struct {
-		name string
-		code int
-		fee  int
-		want string
+		name   string
+		code   int
+		fee    int
+		reason string
+		want   string
 	}{
-		{name: "empty url list", code: 200, want: ": music 123, code 200, fee 0"},
-		{name: "no audio", code: 404, fee: 1, want: ": music 123, code 404, fee 1"},
+		{name: "empty url list", code: 200, want: ": netease 123, no audio url (code 200, fee 0)"},
+		{name: "no audio", code: 404, fee: 1, want: ": netease 123, no audio url (code 404, fee 1)"},
+		{name: "with reason", code: 404, reason: "无版权或已下架", want: ": netease 123, no audio url: 无版权或已下架 (code 404, fee 0)"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			tg, rec := newTestBot(t)
@@ -186,7 +188,7 @@ func TestProcessMusicInfoWithoutURL(t *testing.T) {
 					Artists: []string{"ゆめこ"},
 					Album:   "最新热歌慢摇92",
 					Ext:     "mp3",
-				}, &provider.NoAudioError{Code: tt.code, Fee: tt.fee}
+				}, &provider.NoAudioError{Code: tt.code, Fee: tt.fee, Reason: tt.reason}
 			}
 			setTestProvider(t, a, p)
 			calls := 0
@@ -198,8 +200,8 @@ func TestProcessMusicInfoWithoutURL(t *testing.T) {
 					t.Errorf("unexpected song info: %+v", info)
 				}
 			})
-			if err == nil || err.Error() != render.GetURLFailed+tt.want {
-				t.Fatalf("err = %v, want %s", err, render.GetURLFailed+tt.want)
+			if err == nil || err.Error() != render.NoAudioLog+tt.want {
+				t.Fatalf("err = %v, want %s", err, render.NoAudioLog+tt.want)
 			}
 			if calls != 1 || requests != 1 {
 				t.Errorf("metadata calls = %d, API requests = %d, want 1 each", calls, requests)

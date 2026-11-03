@@ -283,8 +283,8 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 			}
 			var noAudio *provider.NoAudioError
 			if errors.As(err, &noAudio) {
-				a.showStatus(status, render.GetURLFailed)
-				return songInfo, fmt.Errorf("%s: music %s, code %d, fee %d", render.GetURLFailed, ref.ID, noAudio.Code, noAudio.Fee)
+				a.showStatus(status, render.NoAudio(noAudio.Reason))
+				return songInfo, fmt.Errorf("%s: %s %s, %v", render.NoAudioLog, ref.Provider, ref.ID, noAudio)
 			}
 			a.showStatus(status, render.FetchInfoFailed)
 			return songInfo, err

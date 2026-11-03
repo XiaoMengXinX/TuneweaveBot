@@ -154,3 +154,12 @@ func TestStatusLines(t *testing.T) {
 		t.Errorf("AuthLine = %q", got)
 	}
 }
+
+func TestNoAudio(t *testing.T) {
+	if got := NoAudio(""); got != GetURLFailed {
+		t.Errorf("无原因时 = %q", got)
+	}
+	if got := NoAudio("需购买<专辑>"); got != "无法获取这首歌：需购买&lt;专辑&gt;" {
+		t.Errorf("NoAudio = %q", got)
+	}
+}
