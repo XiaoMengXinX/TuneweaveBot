@@ -80,6 +80,20 @@ level = "hires"            # 优先音质，无权限时自动降级
 - 启动时若缺少插件声明的配置项会自动补全（终端运行时先询问）
 - 指令菜单启动时自动注册；inline 模式需在 @BotFather 手动开启
 
+### 从 Music163bot 迁移
+
+启动时会检查数据库结构，不符合时拒绝启动并说明原因，不会改动该数据库。Music163bot 的数据库
+（Go / v2 / Next）需要导入到新库：
+
+```sh
+./TuneweaveBot import-db -from /path/to/Music163bot/cache.db   # 导入到 [database] path
+# Docker：把旧库放进 data/ 后执行
+docker compose run --rm bot ./TuneweaveBot import-db -from /app/data/old.db
+```
+
+旧库只读不改；已删除或没有 file_id 的记录跳过，已有的歌曲不覆盖，可重复执行。也可用来合并另一个
+TuneweaveBot 数据库。缓存的 file_id 只对上传它的 bot 有效，请继续使用原来的 bot token。
+
 ## 🤖 命令
 
 ### 用户

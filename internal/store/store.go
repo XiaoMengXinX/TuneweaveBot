@@ -63,6 +63,12 @@ func Open(path string, gormLogger logger.Interface) (*Store, error) {
 		return nil, err
 	}
 
+	// 先检查已有表，避免在结构不符的数据库（如 Music163bot 的旧库）上执行迁移
+	if err := validateSchema(db, path, false); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+
 	// goose 只扫描 FS 根目录
 	migrations, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -73,7 +79,12 @@ func Open(path string, gormLogger logger.Interface) (*Store, error) {
 		return nil, err
 	}
 	if _, err := provider.Up(context.Background()); err != nil {
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
+	}
+	if err := validateSchema(db, path, true); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
 	}
 	return &Store{db: db}, nil
 }

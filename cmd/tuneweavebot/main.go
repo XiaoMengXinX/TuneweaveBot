@@ -31,28 +31,36 @@ func main() {
 
 	cfgPath := flag.String("c", "config.toml", "配置文件路径")
 	pluginDir := flag.String("plugins", "./plugins", "gen-config 读取插件 schema 的目录")
+	importFrom := flag.String("from", "", "import-db 要导入的源数据库（TuneweaveBot 或 Music163bot）")
 	flag.Usage = func() {
 		w := flag.CommandLine.Output()
 		fmt.Fprintf(w, "Usage:\n")
-		fmt.Fprintf(w, "  %s [-c 配置文件]                  启动 bot\n", os.Args[0])
-		fmt.Fprintf(w, "  %s gen-config [-plugins 目录]     生成带注释的配置模板到 stdout\n\n", os.Args[0])
+		fmt.Fprintf(w, "  %s [-c config]			启动 bot\n", os.Args[0])
+		fmt.Fprintf(w, "  %s gen-config [-plugins path]	生成带注释的配置模板到 stdout\n", os.Args[0])
+		fmt.Fprintf(w, "  %s import-db -from database	从 Music163bot 迁移\n\n", os.Args[0])
 		fmt.Fprintf(w, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(w, "\nExample:\n")
 		fmt.Fprintf(w, "  %s -c config.toml\n", os.Args[0])
 		fmt.Fprintf(w, "  %s gen-config -plugins ./plugins > config.toml\n", os.Args[0])
+		fmt.Fprintf(w, "  %s import-db -from ../Music163bot/cache.db\n", os.Args[0])
 	}
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if flag.Arg(0) == "gen-config" {
+	switch cmd := flag.Arg(0); cmd {
+	case "gen-config", "import-db":
 		// flag 遇到子命令即停止解析，子命令后的参数需再解析一次
 		if err := flag.CommandLine.Parse(flag.Args()[1:]); err != nil {
 			os.Exit(2)
 		}
-		if err := genConfig(ctx, *pluginDir); err != nil {
+		run := func() error { return genConfig(ctx, *pluginDir) }
+		if cmd == "import-db" {
+			run = func() error { return importDB(*cfgPath, *importFrom) }
+		}
+		if err := run(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
