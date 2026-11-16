@@ -52,7 +52,7 @@ Bot API 服务：使用时填写其中的 `TELEGRAM_API_ID` / `TELEGRAM_API_HASH
 
 ### 从源码构建
 
-需要 Go 1.26+ 与 Node.js 22.12+（构建看板前端，产物嵌入二进制）。
+需要 Go 1.26+ 与 Node.js 22.12+（构建面板前端，产物嵌入二进制）。
 
 ```sh
 git clone https://github.com/XiaoMengXinX/TuneweaveBot && cd TuneweaveBot
@@ -84,18 +84,18 @@ level = "hires"            # 优先音质，无权限时自动降级
 - 启动时若缺少插件声明的配置项会自动补全（终端运行时先询问）
 - 指令菜单启动时自动注册；inline 模式需在 @BotFather 手动开启
 
-### 看板（Mini App）
+### 面板（Mini App）
 
-看板是一个 Telegram Mini App：用户可以查看点过的歌曲、搜索点歌，`[bot] admin` 中的管理员还能查看
+面板是一个 Telegram Mini App：用户可以查看点过的歌曲、搜索点歌，`[bot] admin` 中的管理员还能查看
 状态与统计、管理缓存、登录、更新插件、查看配置与日志。填写公网 HTTPS 地址后启用，留空则不启动 HTTP 服务：
 
 ```toml
 [webapp]
-url = "https://bot.example.com/"   # 看板的公网 HTTPS 地址
+url = "https://bot.example.com/"   # 面板的公网 HTTPS 地址
 # listen = "127.0.0.1:8080"        # HTTP 服务的监听地址，默认只监听本机
 ```
 
-启动时 bot 会把 Menu Button 注册为打开看板，私聊发送 `/start` 也会给出入口按钮，不需要在 @BotFather
+启动时 bot 会把 Menu Button 注册为打开面板，私聊发送 `/start` 也会给出入口按钮，不需要在 @BotFather
 中配置。之后移除 `url` 时，Menu Button 需在 @BotFather 中手动恢复。
 
 bot 只在本机提供 HTTP，公网的 HTTPS 入口有两种部署模式，二选一：
@@ -130,7 +130,7 @@ ingress:
 bot，对外的地址是 Worker 的 `*.workers.dev` 域名，因此 tunnel 不需要绑定自己的域名。Worker 不保存页面，
 只在边缘缓存带内容哈希的前端文件，部署一次即可，升级 bot 后不需要重新部署。
 
-选用前需要知道：Workers VPC 目前处于 beta，功能和接口可能变化；看板的每个请求都计入 Worker 的请求额度
+选用前需要知道：Workers VPC 目前处于 beta，功能和接口可能变化；面板的每个请求都计入 Worker 的请求额度
 （免费计划每天 10 万次）。
 
 1. 准备一个连接到 bot 所在机器的 Cloudflare Tunnel，不需要为它配置公网域名。
@@ -140,7 +140,7 @@ bot，对外的地址是 Worker 的 `*.workers.dev` 域名，因此 tunnel 不�
    cd worker && npm install
    ```
 
-3. 把 bot 的看板服务注册为 VPC Service，记下输出的 Service ID。主机与端口是从 tunnel 所在机器访问
+3. 把 bot 的面板服务注册为 VPC Service，记下输出的 Service ID。主机与端口是从 tunnel 所在机器访问
    bot 的地址，与 `[webapp] listen` 对应：
 
    ```sh
@@ -158,7 +158,7 @@ bot，对外的地址是 Worker 的 `*.workers.dev` 域名，因此 tunnel 不�
 5. 把 `[webapp] url` 设为 Worker 的地址（`https://<name>.<account>.workers.dev/`，或在 Cloudflare 中
    为 Worker 绑定的自定义域名），重启或 `/reload` bot。
 
-bot 重载或未启动时，Worker 返回 502，已经打开的看板会提示稍后重试。
+bot 重载或未启动时，Worker 返回 502，已经打开的面板会提示稍后重试。
 
 #### 共同事项
 
@@ -168,7 +168,7 @@ bot 重载或未启动时，Worker 返回 502，已经打开的看板会提示�
 - 限流按客户端 IP 和用户分别计数，超出后返回 429；搜索另有更严格的频率与并发限制，同一用户同时只处理
   一个点歌任务并沿用搜索按钮的冷却时间。客户端 IP 取自 `CF-Connecting-IP`、`X-Real-IP`（Worker 模式）或
   `X-Forwarded-For`，仅在连接来自本机或内网时采信。
-- 看板中的点歌统计来自点歌记录表，从升级到带看板的版本后开始累计；inline 选歌不计入。
+- 面板中的点歌统计来自点歌记录表，从升级到带面板的版本后开始累计；inline 选歌不计入。
 
 前端源码在 `web/`，`npm run dev:mock` 可用假数据在浏览器中预览界面；Worker 源码在 `worker/`。
 

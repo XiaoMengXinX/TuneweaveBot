@@ -46,7 +46,7 @@ plugins/netease/netease
 # macOS
 .DS_Store
 
-# 看板前端依赖与构建产物（dist 由 go:embed 引用，保留占位文件）
+# 面板前端依赖与构建产物（dist 由 go:embed 引用，保留占位文件）
 web/node_modules/
 /internal/webapp/dist/*
 !/internal/webapp/dist/.gitkeep

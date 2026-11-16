@@ -1,10 +1,10 @@
-// 看板的 Worker 模式：复制为 wrangler.jsonc 后填写 service_id，部署方法见 README
+// 面板的 Worker 模式：复制为 wrangler.jsonc 后填写 service_id，部署方法见 README
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "tuneweave-webapp",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-16",
-  // 指向 bot 看板服务的 VPC Service，由 wrangler vpc service create 创建
+  // 指向 bot 面板服务的 VPC Service，由 wrangler vpc service create 创建
   "vpc_services": [
     {
       "binding": "BOT",

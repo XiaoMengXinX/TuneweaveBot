@@ -203,7 +203,7 @@ const (
 	loginCheckFailed = "check_failed"
 )
 
-// loginEvent 是登录会话的进展，由 Telegram 消息或看板各自展示。
+// loginEvent 是登录会话的进展，由 Telegram 消息或面板各自展示。
 type loginEvent struct {
 	state    string
 	nickname string

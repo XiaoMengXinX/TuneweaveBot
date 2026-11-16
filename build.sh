@@ -12,7 +12,7 @@ LDFlags="\
     -X 'main.buildTime=${BUILD_TIME}'\
 "
 
-# 看板前端构建到 internal/webapp/dist 后嵌入二进制；SKIP_WEB=1 时沿用该目录的现有内容
+# 面板前端构建到 internal/webapp/dist 后嵌入二进制；SKIP_WEB=1 时沿用该目录的现有内容
 if [ "${SKIP_WEB:-0}" != "1" ]; then
     (cd web && npm ci && npm run build)
 fi

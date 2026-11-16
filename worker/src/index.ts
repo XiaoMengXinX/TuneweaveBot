@@ -1,5 +1,5 @@
-// 看板的 Worker 模式：把全部请求经 Workers VPC 转发给 bot，让没有域名的部署可以用
-// *.workers.dev 作为看板地址。页面、接口、身份校验与限流都由 bot 提供；Worker 只在边缘缓存
+// 面板的 Worker 模式：把全部请求经 Workers VPC 转发给 bot，让没有域名的部署可以用
+// *.workers.dev 作为面板地址。页面、接口、身份校验与限流都由 bot 提供；Worker 只在边缘缓存
 // 带内容哈希的前端文件，所以升级 bot 后不需要重新部署 Worker。
 
 interface Env {

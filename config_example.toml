@@ -12,8 +12,8 @@ cache_chat = 0                                # 缓存群 ID，Guest Mode 点歌
 debug = false                                 # 在终端输出 SDK 调试日志，[log] level 为 debug 时同时写入日志文件
 
 [webapp]
-url = ""                  # 看板（Mini App）的公网 HTTPS 地址，填写后启用并自动注册到 bot 的 Menu Button；留空不启动
-listen = "127.0.0.1:8080" # 看板 HTTP 服务的监听地址，由 cloudflared 或反向代理转发到这里；保持只监听本机
+url = ""                  # 面板（Mini App）的公网 HTTPS 地址，填写后启用并自动注册到 bot 的 Menu Button；留空不启动
+listen = "127.0.0.1:8080" # 面板 HTTP 服务的监听地址，由 cloudflared 或反向代理转发到这里；保持只监听本机
 
 [plugins]
 dir = "./plugins"                # 插件目录，支持 .wasm 与 .wasm.gz；构建产物在 dist/plugins

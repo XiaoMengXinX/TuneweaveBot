@@ -1,4 +1,4 @@
-// Package webapp 提供 Mini App 看板的前端资源与 initData 校验。
+// Package webapp 提供 Mini App 面板的前端资源与 initData 校验。
 package webapp
 
 import (

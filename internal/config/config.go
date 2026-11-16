@@ -132,7 +132,7 @@ func (p PluginsConfig) HTTPClient() (*http.Client, error) {
 	return client, nil
 }
 
-// WebAppConfig 是 Telegram Mini App 看板的 HTTP 服务配置，URL 留空时不启动。
+// WebAppConfig 是 Telegram Mini App 面板的 HTTP 服务配置，URL 留空时不启动。
 type WebAppConfig struct {
 	Listen string `toml:"listen"`
 	URL    string `toml:"url"`
