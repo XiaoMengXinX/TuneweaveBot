@@ -1,0 +1,74 @@
+/* 色板：Radix Colors。slate 为中性色，indigo 为强调色，grass/amber/tomato 表示状态。
+   色阶按 Radix 的语义使用：1-2 背景，3-5 控件背景，6-8 边框，9-10 实色，11-12 文字。 */
+@import '@radix-ui/colors/slate.css';
+@import '@radix-ui/colors/slate-alpha.css';
+@import '@radix-ui/colors/slate-dark.css';
+@import '@radix-ui/colors/slate-dark-alpha.css';
+@import '@radix-ui/colors/indigo.css';
+@import '@radix-ui/colors/indigo-alpha.css';
+@import '@radix-ui/colors/indigo-dark.css';
+@import '@radix-ui/colors/indigo-dark-alpha.css';
+@import '@radix-ui/colors/grass.css';
+@import '@radix-ui/colors/grass-alpha.css';
+@import '@radix-ui/colors/grass-dark.css';
+@import '@radix-ui/colors/grass-dark-alpha.css';
+@import '@radix-ui/colors/amber.css';
+@import '@radix-ui/colors/amber-alpha.css';
+@import '@radix-ui/colors/amber-dark.css';
+@import '@radix-ui/colors/amber-dark-alpha.css';
+@import '@radix-ui/colors/tomato.css';
+@import '@radix-ui/colors/tomato-alpha.css';
+@import '@radix-ui/colors/tomato-dark.css';
+@import '@radix-ui/colors/tomato-dark-alpha.css';
+
+:root {
+  color-scheme: light;
+
+  --bg: var(--slate-2);
+  --surface: #fff;
+  --fill: var(--slate-a3); /* 输入框、分段控件等控件底色 */
+  --fill-pressed: var(--slate-a4);
+  --border: var(--slate-a6);
+  --text: var(--slate-12);
+  --text-2: var(--slate-11);
+  --text-3: var(--slate-10);
+
+  --accent: var(--indigo-9);
+  --accent-text: var(--indigo-11);
+  --accent-soft: var(--indigo-a3);
+  --accent-soft-pressed: var(--indigo-a4);
+  --on-accent: #fff;
+
+  --ok-text: var(--grass-11);
+  --ok-soft: var(--grass-a3);
+  --ok-solid: var(--grass-9);
+  --warn-text: var(--amber-11);
+  --warn-soft: var(--amber-a3);
+  --danger-text: var(--tomato-11);
+  --danger-soft: var(--tomato-a3);
+  --danger-soft-pressed: var(--tomato-a4);
+  --danger-solid: var(--tomato-9);
+
+  /* 字号只有四级 */
+  --fs-caption: 12px;
+  --fs-small: 14px;
+  --fs-body: 16px;
+  --fs-display: 28px;
+
+  --radius-card: 14px;
+  --radius-control: 10px;
+  --hairline: 0.5px;
+  --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
+  --t-fast: 150ms;
+  --t-base: 250ms;
+
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
+  --tabbar-height: 54px;
+}
+
+:root.dark {
+  color-scheme: dark;
+  --bg: var(--slate-1);
+  --surface: var(--slate-2);
+  --on-accent: #fff;
+}
