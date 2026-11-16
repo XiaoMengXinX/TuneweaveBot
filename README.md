@@ -52,12 +52,13 @@ Bot API 服务：使用时填写其中的 `TELEGRAM_API_ID` / `TELEGRAM_API_HASH
 
 ### 从源码构建
 
-需要 Go 1.26+。
+需要 Go 1.26+ 与 Node.js 22.12+（构建看板前端，产物嵌入二进制）。
 
 ```sh
 git clone https://github.com/XiaoMengXinX/TuneweaveBot && cd TuneweaveBot
 bash build.sh                            # 主程序 ./TuneweaveBot，插件 dist/plugins/*.wasm.gz
 GOOS=windows GOARCH=amd64 bash build.sh  # 交叉编译
+SKIP_WEB=1 bash build.sh                 # 跳过前端构建，沿用 internal/webapp/dist 的现有内容
 ```
 
 把 `dist/plugins/` 中的插件放进 `[plugins] dir`（默认 `./plugins`），或把 `dir` 指向
@@ -78,10 +79,98 @@ level = "hires"            # 优先音质，无权限时自动降级
 ```
 
 - 完整配置项及说明见 `config_example.toml`，或用 `./TuneweaveBot gen-config` 按已装插件生成
-- 环境变量可覆盖 `[bot]`、`[plugins]`、`[database]`、`[download]`、`[log]` 的配置项，格式为
+- 环境变量可覆盖 `[bot]`、`[webapp]`、`[plugins]`、`[database]`、`[download]`、`[log]` 的配置项，格式为
   `TUNEWEAVE_<段>_<键>`，如 `TUNEWEAVE_BOT_TOKEN`、`TUNEWEAVE_DOWNLOAD_TIMEOUT`；`[plugins.<名称>]` 插件配置段不支持
 - 启动时若缺少插件声明的配置项会自动补全（终端运行时先询问）
 - 指令菜单启动时自动注册；inline 模式需在 @BotFather 手动开启
+
+### 看板（Mini App）
+
+看板是一个 Telegram Mini App：用户可以查看点过的歌曲、搜索点歌，`[bot] admin` 中的管理员还能查看
+状态与统计、管理缓存、登录、更新插件、查看配置与日志。填写公网 HTTPS 地址后启用，留空则不启动 HTTP 服务：
+
+```toml
+[webapp]
+url = "https://bot.example.com/"   # 看板的公网 HTTPS 地址
+# listen = "127.0.0.1:8080"        # HTTP 服务的监听地址，默认只监听本机
+```
+
+启动时 bot 会把 Menu Button 注册为打开看板，私聊发送 `/start` 也会给出入口按钮，不需要在 @BotFather
+中配置。之后移除 `url` 时，Menu Button 需在 @BotFather 中手动恢复。
+
+bot 只在本机提供 HTTP，公网的 HTTPS 入口有两种部署模式，二选一：
+
+| | 模式一：Tunnel 直连 | 模式二：Worker + Workers VPC |
+| --- | --- | --- |
+| 适用 | 有托管在 Cloudflare 上的域名 | 没有域名，使用免费的 `*.workers.dev` 地址 |
+| 额外组件 | 无 | 一个 Worker，部署一次 |
+
+两种模式下页面、接口、身份校验与限流都由 bot 提供，对外的访问范围相同，bot 的配置也相同，
+`url` 填最终对外的地址。有域名时用模式一即可。
+
+#### 模式一：Tunnel 直连
+
+域名经 Cloudflare Tunnel（或其他反向代理）直接转发到 bot。在 tunnel 的配置中把域名指向监听地址：
+
+```yaml
+# ~/.cloudflared/config.yml
+tunnel: <tunnel-id>
+credentials-file: /path/to/<tunnel-id>.json
+ingress:
+  - hostname: bot.example.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404
+```
+
+`url` 可以带路径前缀（如 `https://example.com/tuneweave/`），此时须以 `/` 结尾，转发时去掉该前缀。
+
+#### 模式二：Worker + Workers VPC
+
+一个 Cloudflare Worker 经 [Workers VPC](https://developers.cloudflare.com/workers-vpc/) 把全部请求转发给
+bot，对外的地址是 Worker 的 `*.workers.dev` 域名，因此 tunnel 不需要绑定自己的域名。Worker 不保存页面，
+只在边缘缓存带内容哈希的前端文件，部署一次即可，升级 bot 后不需要重新部署。
+
+选用前需要知道：Workers VPC 目前处于 beta，功能和接口可能变化；看板的每个请求都计入 Worker 的请求额度
+（免费计划每天 10 万次）。
+
+1. 准备一个连接到 bot 所在机器的 Cloudflare Tunnel，不需要为它配置公网域名。
+2. 安装 Worker 的依赖：
+
+   ```sh
+   cd worker && npm install
+   ```
+
+3. 把 bot 的看板服务注册为 VPC Service，记下输出的 Service ID。主机与端口是从 tunnel 所在机器访问
+   bot 的地址，与 `[webapp] listen` 对应：
+
+   ```sh
+   npx wrangler vpc service create tuneweave-bot \
+     --type http --tunnel-id <tunnel-id> --hostname localhost --http-port 8080
+   ```
+
+4. 复制 `wrangler.example.jsonc` 为 `wrangler.jsonc`，把 `service_id` 换成上一步的 ID，然后部署：
+
+   ```sh
+   cp wrangler.example.jsonc wrangler.jsonc
+   npx wrangler deploy
+   ```
+
+5. 把 `[webapp] url` 设为 Worker 的地址（`https://<name>.<account>.workers.dev/`，或在 Cloudflare 中
+   为 Worker 绑定的自定义域名），重启或 `/reload` bot。
+
+bot 重载或未启动时，Worker 返回 502，已经打开的看板会提示稍后重试。
+
+#### 共同事项
+
+- 保持 `listen` 只监听本机。监听其他地址时，本机以外可以绕过 Cloudflare 直接访问，bot 启动时会给出警告。
+  Docker 部署时让 cloudflared 与 bot 处于同一网络，把 `listen` 设为 `0.0.0.0:8080`，不要把端口映射到宿主机。
+- 接口用 Mini App 的 initData（以 bot token 签名，24 小时内有效）校验身份，管理接口在服务端校验管理员。
+- 限流按客户端 IP 和用户分别计数，超出后返回 429；搜索另有更严格的频率与并发限制，同一用户同时只处理
+  一个点歌任务并沿用搜索按钮的冷却时间。客户端 IP 取自 `CF-Connecting-IP`、`X-Real-IP`（Worker 模式）或
+  `X-Forwarded-For`，仅在连接来自本机或内网时采信。
+- 看板中的点歌统计来自点歌记录表，从升级到带看板的版本后开始累计；inline 选歌不计入。
+
+前端源码在 `web/`，`npm run dev:mock` 可用假数据在浏览器中预览界面；Worker 源码在 `worker/`。
 
 ### 从 Music163bot 迁移
 
