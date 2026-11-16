@@ -1,3 +1,13 @@
+FROM node:24-alpine AS web
+
+WORKDIR /build/web
+
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ ./
+RUN npm run build
+
 FROM golang:1.26-alpine AS builder
 
 WORKDIR /build
@@ -8,8 +18,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+COPY --from=web /build/internal/webapp/dist ./internal/webapp/dist
 # 插件不打进镜像：从 plugin release 下载到挂载的 /app/plugins，才能通过 /checkupdate 更新
-RUN SKIP_PLUGINS=1 sh build.sh
+RUN SKIP_PLUGINS=1 SKIP_WEB=1 sh build.sh
 
 FROM alpine:3.21
 

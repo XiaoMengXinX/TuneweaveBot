@@ -13,5 +13,10 @@ plugins/*.wasm
 cache
 *.db
 
+web/node_modules
+worker
+internal/webapp/dist/assets
+internal/webapp/dist/index.html
+
 #Docker
 docker-compose.yml

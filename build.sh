@@ -12,6 +12,11 @@ LDFlags="\
     -X 'main.buildTime=${BUILD_TIME}'\
 "
 
+# 看板前端构建到 internal/webapp/dist 后嵌入二进制；SKIP_WEB=1 时沿用该目录的现有内容
+if [ "${SKIP_WEB:-0}" != "1" ]; then
+    (cd web && npm ci && npm run build)
+fi
+
 CGO_ENABLED=0 go build -trimpath -ldflags "${LDFlags}" -o TuneweaveBot ./cmd/tuneweavebot
 
 # SKIP_PLUGINS=1 时只构建主程序（插件由 plugin 工作流单独构建）
