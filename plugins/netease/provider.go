@@ -203,10 +203,10 @@ func trackFromSong(ref Ref, song types.SongDetailData, urlData types.SongsURLDat
 }
 
 func search(keyword string, limit, offset int) ([]TrackSummary, int, error) {
-	result, err := client.SearchSong(keyword, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
+	return client.SearchSongs(keyword, limit, offset)
+}
+
+func searchSongDataToSummaries(result types.SearchSongData) []TrackSummary {
 	items := make([]TrackSummary, 0, len(result.Result.Songs))
 	for _, song := range result.Result.Songs {
 		names := make([]string, 0, len(song.Artists))
@@ -221,7 +221,21 @@ func search(keyword string, limit, offset int) ([]TrackSummary, int, error) {
 			DurationMS: song.Duration,
 		})
 	}
-	return items, result.Result.SongCount, nil
+	return items
+}
+
+func cloudSearchDataToSummaries(result types.CloudSearchSongData) []TrackSummary {
+	items := make([]TrackSummary, 0, len(result.Result.Songs))
+	for _, song := range result.Result.Songs {
+		items = append(items, TrackSummary{
+			Ref:        *songRef(song.Id),
+			Title:      song.Name,
+			Artists:    artistNames(song),
+			Album:      song.Al.Name,
+			DurationMS: song.Dt,
+		})
+	}
+	return items
 }
 
 func lyrics(ref Ref) (*Lyric, error) {

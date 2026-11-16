@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/pluginsdk"
 )
@@ -159,9 +160,12 @@ func TestResolveProgramEnrich(t *testing.T) {
 }
 
 func TestSearch(t *testing.T) {
+	var gotCookie string
 	setTestClient(t, func(r *http.Request) (*http.Response, error) {
+		gotCookie = r.Header.Get("Cookie")
 		return jsonResponse(`{"code":200,"result":{"songCount":1,"songs":[{"id":123,"name":"Song","duration":1000,"artists":[{"name":"A"},{"name":"B"}],"album":{"name":"Album"}}]}}`), nil
 	})
+	client.SetMUSICU("user-music-u")
 	items, total, err := search("keyword", 10, 0)
 	if err != nil || total != 1 || len(items) != 1 {
 		t.Fatalf("search = %+v, %d, %v", items, total, err)
@@ -172,6 +176,85 @@ func TestSearch(t *testing.T) {
 	}
 	if item.PageURL != songPageURL(123) || item.ShareText != songURL(123) {
 		t.Errorf("item links = %q / %q", item.PageURL, item.ShareText)
+	}
+	if !strings.Contains(gotCookie, "MUSIC_U=user-music-u") {
+		t.Errorf("expected MUSIC_U in cookie, got %q", gotCookie)
+	}
+}
+
+func TestSearchFallbackEndpoints(t *testing.T) {
+	var paths []string
+	setTestClient(t, func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/eapi/v1/search/song/get":
+			return jsonResponse(`{"code":405,"msg":"操作频繁"}`), nil
+		case "/eapi/search/get":
+			return jsonResponse(`{"code":406,"msg":"操作频繁"}`), nil
+		case "/eapi/cloudsearch/pc":
+			return jsonResponse(`{"code":200,"result":{"songCount":1,"songs":[{"id":456,"name":"CloudSong","dt":2000,"ar":[{"name":"C"}],"al":{"name":"CloudAlbum"}}]}}`), nil
+		}
+		return jsonResponse(`{"code":404}`), nil
+	})
+	now := time.Unix(1_800_000_000, 0)
+	client.now = func() time.Time { return now }
+	client.SetMUSICU("user-music-u")
+
+	items, total, err := search("keyword", 10, 0)
+	if err != nil || total != 1 || len(items) != 1 {
+		t.Fatalf("search = %+v, %d, %v", items, total, err)
+	}
+	if items[0].ID != "456" || items[0].Title != "CloudSong" || items[0].Album != "CloudAlbum" || items[0].Artists[0] != "C" {
+		t.Errorf("unexpected item: %+v", items[0])
+	}
+	if strings.Join(paths, ",") != "/eapi/v1/search/song/get,/eapi/search/get,/eapi/cloudsearch/pc" {
+		t.Errorf("paths = %v", paths)
+	}
+
+	// 冷却期内跳过被限的接口，不再重复触发风控
+	paths = nil
+	now = now.Add(searchCooldown - time.Minute)
+	if _, _, err := search("keyword", 10, 8); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(paths, ",") != "/eapi/cloudsearch/pc" {
+		t.Errorf("冷却期内 paths = %v", paths)
+	}
+
+	// 冷却结束后恢复优先使用主接口
+	paths = nil
+	now = now.Add(2 * time.Minute)
+	_, _, _ = search("keyword", 10, 0)
+	if len(paths) == 0 || paths[0] != "/eapi/v1/search/song/get" {
+		t.Errorf("冷却结束后 paths = %v", paths)
+	}
+}
+
+func TestSearchErrorCode(t *testing.T) {
+	var requests int
+	setTestClient(t, func(r *http.Request) (*http.Response, error) {
+		requests++
+		return jsonResponse(`{"msg":"操作频繁，请稍候再试","code":405,"message":"操作频繁，请稍候再试"}`), nil
+	})
+	_, _, err := search("keyword", 10, 0)
+	var pe *pluginsdk.Error
+	if !errors.As(err, &pe) || pe.Code != "rate_limited" {
+		t.Fatalf("全部接口风控时应返回 rate_limited, got %v", err)
+	}
+	// 全部接口都在冷却时仍尝试一次，而不是直接失败
+	requests = 0
+	if _, _, err := search("keyword", 10, 0); err == nil || requests != 1 {
+		t.Errorf("全部冷却时 requests = %d, err = %v", requests, err)
+	}
+
+	// 非风控错误不换接口
+	var paths []string
+	setTestClient(t, func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.URL.Path)
+		return jsonResponse(`{"code":400}`), nil
+	})
+	if _, _, err := search("keyword", 10, 0); err == nil || len(paths) != 1 {
+		t.Errorf("非风控错误 paths = %v, err = %v", paths, err)
 	}
 }
 

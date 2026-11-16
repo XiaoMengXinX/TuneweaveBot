@@ -1,7 +1,7 @@
 github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936 h1:to5zIst65bM0aYtqsUU97yE6kuHKUB078F2z+G4ZQH4=
 github.com/XiaoMengXinX/163KeyMarker v0.0.0-20221030134715-67afb724a936/go.mod h1:L6oR/uZwUSBO7o57qbul/zwUuuKpP4EVnFKmTBscvLY=
-github.com/XiaoMengXinX/Music163Api-Go v0.1.32-0.20261026151159-9167996e9052 h1:kBd77+g6hy4/LBtjAj3UOam4Nj0Z+7WzJDaoG7UtRws=
-github.com/XiaoMengXinX/Music163Api-Go v0.1.32-0.20261026151159-9167996e9052/go.mod h1:kLU/CkLxKnEJFCge0URvQ0lHt6ImoG1/2aVeNbgV2RQ=
+github.com/XiaoMengXinX/Music163Api-Go v0.1.32-0.20261116193049-43010055dd1a h1:vAZ0dnMzO2XdKrjfHU83MYmVE69aJPWR+pYlXqXYFJ8=
+github.com/XiaoMengXinX/Music163Api-Go v0.1.32-0.20261116193049-43010055dd1a/go.mod h1:kLU/CkLxKnEJFCge0URvQ0lHt6ImoG1/2aVeNbgV2RQ=
 github.com/XiaoMengXinX/NeteaseCloudMusic-Audio-Recognize-Reverse v0.0.0-20261102202333-5d7f00f8e902 h1:MtpVyKrCxqQIl0QGpp114eMCWJRQJuDymH4r8E47zFU=
 github.com/XiaoMengXinX/NeteaseCloudMusic-Audio-Recognize-Reverse v0.0.0-20261102202333-5d7f00f8e902/go.mod h1:WlZQZjAWCX4qdD6BZe7mOERK56+GaKg8+AqzxpOC0z0=
 github.com/bogem/id3v2 v1.2.0 h1:hKDF+F1gOgQ5r1QmBCEZUk4MveJbKxCeIDSBU7CQ4oI=

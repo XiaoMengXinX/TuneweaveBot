@@ -6,11 +6,18 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/XiaoMengXinX/Music163Api-Go/api"
 	"github.com/XiaoMengXinX/Music163Api-Go/types"
 	"github.com/XiaoMengXinX/Music163Api-Go/utils"
+
+	"github.com/XiaoMengXinX/TuneweaveBot/pluginsdk"
 )
+
+// searchCooldown 是某个搜索接口触发风控后被跳过的时长。网易云按接口路径分别计数，
+// 实测被限的接口静置十几分钟后恢复。
+const searchCooldown = 15 * time.Minute
 
 // apiClient 是 Music163Api-Go 的薄封装，HTTP 请求经宿主代理。
 type apiClient struct {
@@ -18,10 +25,13 @@ type apiClient struct {
 	musicU string
 	level  string
 	http   *http.Client
+	now    func() time.Time
+	// limitedUntil[i] 是 searchEndpoints[i] 冷却结束的时间，由 mu 保护
+	limitedUntil [len(searchEndpoints)]time.Time
 }
 
 func newAPIClient(client *http.Client, level string) *apiClient {
-	return &apiClient{level: level, http: client}
+	return &apiClient{level: level, http: client, now: time.Now}
 }
 
 func (c *apiClient) SetMUSICU(musicU string) {
@@ -98,8 +108,70 @@ func (c *apiClient) LyricAndDetail(musicID int) (types.SongLyricData, types.Song
 	return lyric, detail, nil
 }
 
-func (c *apiClient) SearchSong(keyword string, limit, offset int) (types.SearchSongData, error) {
-	return api.SearchSong(c.requestData(), api.SearchSongConfig{Keyword: keyword, Limit: limit, Offset: offset})
+type searchEndpoint func(utils.RequestData, api.SearchSongConfig) (items []TrackSummary, total, code int, err error)
+
+// searchEndpoints 按优先级排列。实测三个接口对同一关键词返回的歌曲与顺序一致，
+// 翻页途中换接口不会导致重复或遗漏。
+var searchEndpoints = [...]searchEndpoint{
+	func(data utils.RequestData, cfg api.SearchSongConfig) ([]TrackSummary, int, int, error) {
+		res, err := api.SearchSong(data, cfg)
+		return searchSongDataToSummaries(res), res.Result.SongCount, res.Code, err
+	},
+	func(data utils.RequestData, cfg api.SearchSongConfig) ([]TrackSummary, int, int, error) {
+		res, err := api.SearchSongGet(data, cfg)
+		return searchSongDataToSummaries(res), res.Result.SongCount, res.Code, err
+	},
+	func(data utils.RequestData, cfg api.SearchSongConfig) ([]TrackSummary, int, int, error) {
+		res, err := api.CloudSearchSong(data, cfg)
+		return cloudSearchDataToSummaries(res), res.Result.SongCount, res.Code, err
+	},
+}
+
+// isRateLimitCode 判断搜索接口是否返回了风控（操作频繁）。
+func isRateLimitCode(code int) bool {
+	return code == 405 || code == 406
+}
+
+func (c *apiClient) searchAvailable(i int, now time.Time) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return now.After(c.limitedUntil[i])
+}
+
+func (c *apiClient) coolDown(i int, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.limitedUntil[i] = now.Add(searchCooldown)
+}
+
+// SearchSongs 依次尝试各搜索接口，只有遇到风控才换下一个，并让被限的接口冷却一段时间；
+// 网络错误与其他错误码直接返回。全部接口都在冷却时仍尝试最后一个接口。
+func (c *apiClient) SearchSongs(keyword string, limit, offset int) ([]TrackSummary, int, error) {
+	cfg := api.SearchSongConfig{Keyword: keyword, Limit: limit, Offset: offset}
+	data := c.requestData()
+	now := c.now()
+	var lastErr error
+	tried := false
+	for i, endpoint := range searchEndpoints {
+		last := i == len(searchEndpoints)-1
+		if !c.searchAvailable(i, now) && (tried || !last) {
+			continue
+		}
+		tried = true
+		items, total, code, err := endpoint(data, cfg)
+		if err != nil {
+			return nil, 0, err
+		}
+		if code == 200 {
+			return items, total, nil
+		}
+		lastErr = fmt.Errorf("netease search error (code %d)", code)
+		if !isRateLimitCode(code) {
+			return nil, 0, lastErr
+		}
+		c.coolDown(i, now)
+	}
+	return nil, 0, pluginsdk.Fail("rate_limited", lastErr.Error())
 }
 
 func (c *apiClient) ProgramDetail(programID int) (types.ProgramDetailData, error) {
