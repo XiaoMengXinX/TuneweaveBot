@@ -62,7 +62,7 @@ func (l *rateLimiter[K]) sweep(now time.Time) {
 	}
 }
 
-// 看板的限流参数。前端正常使用时的请求量：打开页面约 10 个请求，之后以秒级间隔轮询。
+// 面板的限流参数。前端正常使用时的请求量：打开页面约 10 个请求，之后以秒级间隔轮询。
 const (
 	// 按客户端 IP，校验身份之前生效，覆盖静态文件与无效 initData 的请求。
 	// 同一出口 IP 下可能有多个用户，额度比单用户宽。
@@ -71,7 +71,7 @@ const (
 	userRate, userBurst = 5, 30
 	// 按用户的搜索：每次搜索都会调用音乐平台的接口
 	searchRate, searchBurst = 1.0 / 3, 6
-	// 看板同时进行的搜索数。搜索与 bot 命令共用插件实例，留出余量给聊天中的请求。
+	// 面板同时进行的搜索数。搜索与 bot 命令共用插件实例，留出余量给聊天中的请求。
 	searchConcurrency = 2
 )
 
@@ -110,9 +110,9 @@ func (g *webGuard) beginMusic(userID int64) (done func(), ok bool) {
 	}, true
 }
 
-func tooManyRequests(w http.ResponseWriter, retryAfter time.Duration) {
+func tooManyRequests(w http.ResponseWriter, r *http.Request, retryAfter time.Duration) {
 	w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
-	writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求过于频繁，请稍后再试"})
+	writeError(w, r, http.StatusTooManyRequests, msgTooManyRequests)
 }
 
 // clientIP 返回限流用的客户端地址。只有连接来自本机或内网（即经过 cloudflared 或反向代理）
@@ -157,7 +157,7 @@ func (a *App) guard(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		if ok, retryAfter := a.web.guard.byIP.allow(clientIP(r), time.Now()); !ok {
-			tooManyRequests(w, retryAfter)
+			tooManyRequests(w, r, retryAfter)
 			return
 		}
 		next.ServeHTTP(w, r)

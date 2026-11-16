@@ -94,7 +94,7 @@ func (a *App) guestRef(ctx context.Context, m *models.Message) (*provider.Ref, b
 }
 
 func (a *App) cacheMusic(ctx context.Context, ref, display provider.Ref, track *provider.Track, m *models.Message, chatID int64) (store.SongInfo, error) {
-	release, err := a.acquireDownload(ctx)
+	task, release, err := a.acquireDownload(ctx, messageOrigin(m, sourceGuest), ref)
 	if err != nil {
 		return store.SongInfo{}, err
 	}
@@ -102,7 +102,7 @@ func (a *App) cacheMusic(ctx context.Context, ref, display provider.Ref, track *
 	if songInfo, ok := a.store.GetByRef(ref.Provider, ref.ID); ok && songInfo.FileID != "" {
 		return songInfo, nil
 	}
-	return a.fetchMusic(ctx, ref, display, track, messageOrigin(m, sourceGuest), nil, chatID, nil, func(string) error { return nil })
+	return a.fetchMusic(ctx, ref, display, track, task, nil, chatID, nil, func(string) error { return nil })
 }
 
 func (a *App) guestRecognize(ctx context.Context, voice *models.Voice) models.InlineQueryResult {

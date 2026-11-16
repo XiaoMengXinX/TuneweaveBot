@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -122,6 +123,8 @@ func (a *App) handleStatus(ctx context.Context, tg *tgb.Bot, update *models.Upda
 	total, byUser, byChat := a.store.Counts(m.From.ID, m.Chat.ID)
 	var text strings.Builder
 	text.WriteString(render.StatusInfo(m.Chat.Title, m.Chat.Username, m.Chat.ID, m.From.ID, total, byChat, byUser))
+	mem := memoryUsage()
+	text.WriteString("\n" + render.RuntimeInfo(time.Since(startedAt), mem.Sys, mem.Heap))
 	if a.plugins != nil {
 		if infos := a.plugins.Info(); len(infos) > 0 {
 			text.WriteString("\n<b>[插件]</b>")
@@ -139,6 +142,19 @@ func (a *App) handleStatus(ctx context.Context, tg *tgb.Bot, update *models.Upda
 	if _, err := a.reply(ctx, m, text.String()); err != nil {
 		a.log.Errorln(err)
 	}
+}
+
+// memUsage 是进程的内存占用（字节）。Sys 是 Go 运行时向系统申请的内存，包括插件实例的
+// 线性内存，接近进程实际占用；Heap 是其中正在使用的堆内存。
+type memUsage struct {
+	Sys  uint64 `json:"sys"`
+	Heap uint64 `json:"heap"`
+}
+
+func memoryUsage() memUsage {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return memUsage{Sys: m.Sys, Heap: m.HeapInuse}
 }
 
 func (a *App) handleRmCache(ctx context.Context, tg *tgb.Bot, update *models.Update) {

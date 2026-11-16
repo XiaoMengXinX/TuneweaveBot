@@ -9,11 +9,10 @@ import (
 	"github.com/skip2/go-qrcode"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/provider"
-	"github.com/XiaoMengXinX/TuneweaveBot/internal/render"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/webapp"
 )
 
-// webLogin 是从看板发起的登录会话，结束后保留终态供页面读取。字段由 webState.loginMu 保护。
+// webLogin 是从面板发起的登录会话，结束后保留终态供页面读取。字段由 webState.loginMu 保护。
 type webLogin struct {
 	id        string
 	provider  string
@@ -64,7 +63,7 @@ func (a *App) apiLoginState(r *http.Request, user webapp.User) (any, error) {
 	}
 	a.web.loginMu.Unlock()
 
-	// 没有进行中的看板会话却拿不到登录锁，说明 /login 命令的会话正在进行
+	// 没有进行中的面板会话却拿不到登录锁，说明 /login 命令的会话正在进行
 	busy := false
 	if !active {
 		if a.loginMu.TryLock() {
@@ -86,16 +85,16 @@ func (a *App) apiLoginBegin(r *http.Request, user webapp.User) (any, error) {
 	}
 	auth, ok := a.auth.Get(req.Provider)
 	if !ok {
-		return nil, badRequest(render.LoginUnsupported)
+		return nil, badRequest(msgLoginUnsupported)
 	}
 	if !a.loginMu.TryLock() {
-		return nil, conflict(render.LoginBusy)
+		return nil, conflict(msgLoginBusy)
 	}
 	session, err := a.beginWebLogin(r.Context(), auth, req.Mode)
 	if err != nil {
 		a.loginMu.Unlock()
 		a.log.Errorln(err)
-		return nil, &apiError{http.StatusBadGateway, render.LoginKeyFailed}
+		return nil, &apiError{http.StatusBadGateway, msgLoginBeginFailed}
 	}
 
 	sessCtx, cancel := context.WithCancelCause(a.workCtx)
@@ -161,7 +160,7 @@ func (a *App) runWebLogin(ctx context.Context, auth provider.Authenticator, sess
 	}
 }
 
-// activeWebLogin 返回进行中的看板登录会话。
+// activeWebLogin 返回进行中的面板登录会话。
 func (a *App) activeWebLogin() (*webLogin, bool) {
 	a.web.loginMu.Lock()
 	defer a.web.loginMu.Unlock()
@@ -177,16 +176,16 @@ func (a *App) apiLoginToken(r *http.Request, user webapp.User) (any, error) {
 		return nil, err
 	}
 	if req.Token == "" {
-		return nil, badRequest("请输入 token")
+		return nil, badRequest(msgTokenEmpty)
 	}
 	session, ok := a.activeWebLogin()
 	if !ok || session.kind != "token" {
-		return nil, conflict(render.LoginNoSessionWeb)
+		return nil, conflict(msgLoginNoSession)
 	}
 	select {
 	case session.token <- req.Token:
 	default:
-		return nil, conflict("token 已提交，正在校验")
+		return nil, conflict(msgTokenSubmitted)
 	}
 	return nil, nil
 }
@@ -194,7 +193,7 @@ func (a *App) apiLoginToken(r *http.Request, user webapp.User) (any, error) {
 func (a *App) apiLoginCancel(r *http.Request, user webapp.User) (any, error) {
 	session, ok := a.activeWebLogin()
 	if !ok {
-		return nil, conflict(render.LoginNoSessionWeb)
+		return nil, conflict(msgLoginNoSession)
 	}
 	session.cancel(errLoginCancelled)
 	return nil, nil

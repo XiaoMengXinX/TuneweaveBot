@@ -3,6 +3,7 @@ package render
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -189,5 +190,28 @@ func TestSpeed(t *testing.T) {
 		if got := Speed(in); got != want {
 			t.Errorf("Speed(%v) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestRuntimeInfo(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		42 * time.Second:                "42秒",
+		5 * time.Minute:                 "5分钟",
+		3*time.Hour + 2*time.Minute:     "3小时2分钟",
+		3*24*time.Hour + 4*time.Hour:    "3天4小时",
+		2*24*time.Hour + 30*time.Minute: "2天",
+	} {
+		if got := Uptime(d); got != want {
+			t.Errorf("Uptime(%v) = %q, want %q", d, got, want)
+		}
+	}
+	if got := Bytes(512); got != "512 B" {
+		t.Errorf("Bytes(512) = %q", got)
+	}
+	if got := Bytes(90 << 20); got != "90.0 MB" {
+		t.Errorf("Bytes(90MB) = %q", got)
+	}
+	if got := RuntimeInfo(time.Hour, 90<<20, 30<<20); got != "<b>[运行状态]</b>\n运行时长: 1小时\n内存占用: 90.0 MB（堆 30.0 MB）" {
+		t.Errorf("RuntimeInfo = %q", got)
 	}
 }

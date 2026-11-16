@@ -224,21 +224,6 @@ func (a *App) recordRequest(origin requestOrigin, songInfo store.SongInfo) {
 	}
 }
 
-// acquireDownload 占用一个下载位，返回的函数用于释放。
-func (a *App) acquireDownload(ctx context.Context) (release func(), err error) {
-	a.downloadsWaiting.Add(1)
-	err = a.musicSem.Acquire(ctx, 1)
-	a.downloadsWaiting.Add(-1)
-	if err != nil {
-		return nil, err
-	}
-	a.downloadsActive.Add(1)
-	return func() {
-		a.downloadsActive.Add(-1)
-		a.musicSem.Release(1)
-	}, nil
-}
-
 // processMusic 以规范歌曲 Ref 为缓存键，ref.Sub 非空时先归一子资源。
 func (a *App) processMusic(ctx context.Context, ref provider.Ref, target musicTarget, onInfo func(store.SongInfo)) error {
 	chatID := target.chatID
@@ -306,7 +291,7 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, target musicTa
 	}
 	status := func(text string) error { return a.editMessage(ctx, chatID, msgResult.ID, text, nil) }
 
-	release, err := a.acquireDownload(ctx)
+	task, release, err := a.acquireDownload(ctx, target.origin, canonical)
 	if err != nil {
 		return err
 	}
@@ -323,7 +308,7 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, target musicTa
 		return sendHit(songInfo, msgResult.ID, status)
 	}
 
-	songInfo, err := a.fetchMusic(ctx, canonical, ref, nil, target.origin, onInfo, chatID, reply, status)
+	songInfo, err := a.fetchMusic(ctx, canonical, ref, nil, task, onInfo, chatID, reply, status)
 	if err != nil {
 		return err
 	}
@@ -340,8 +325,9 @@ func (a *App) sendCached(ctx context.Context, songInfo store.SongInfo, track *pr
 	return a.deleteMessage(ctx, chatID, statusMsgID)
 }
 
-// fetchMusic 下载歌曲上传到 chatID 并写入缓存，失败原因已经由 status 展示
-func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *provider.Track, origin requestOrigin, onInfo func(store.SongInfo),
+// fetchMusic 下载歌曲上传到 chatID 并写入缓存，失败原因已经由 status 展示；
+// 进度同时记录到 task，task 来自 acquireDownload。
+func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *provider.Track, task *downloadTask, onInfo func(store.SongInfo),
 	chatID int64, reply *models.ReplyParameters, status func(string) error) (store.SongInfo, error) {
 	var songInfo store.SongInfo
 	if err := status(render.FetchInfo); err != nil {
@@ -353,6 +339,8 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		// 插件在 resolve 内经 media.download 下载时的进度
 		due := throttle(interval)
 		resolveCtx := plugin.WithDownloadProgress(ctx, func(p plugin.DownloadProgress) {
+			task.setTitle(p.Title, p.Album)
+			task.progress(phaseResolving, p.Written, p.Total)
 			if p.Total <= 0 || !due() {
 				return
 			}
@@ -364,7 +352,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		resolved, err := a.providers.Resolve(resolveCtx, ref)
 		if err != nil {
 			if resolved != nil {
-				a.fillSongInfo(&songInfo, resolved, ref, origin)
+				a.fillSongInfo(&songInfo, resolved, ref, task.origin)
 				if onInfo != nil {
 					onInfo(songInfo)
 				}
@@ -389,7 +377,8 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		}
 		track = resolved
 	}
-	a.fillSongInfo(&songInfo, track, ref, origin)
+	a.fillSongInfo(&songInfo, track, ref, task.origin)
+	task.setSong(songInfo)
 	if onInfo != nil {
 		onInfo(songInfo)
 	}
@@ -435,6 +424,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 
 	due := throttle(interval)
 	onProgress := func(p fetch.Progress) {
+		task.progress(phaseDownloading, p.Written, p.Total)
 		if !due() {
 			return
 		}
@@ -462,6 +452,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 			songInfo.MusicSize = int(info.Size())
 		}
 	} else {
+		task.setPhase(phaseDownloading)
 		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.Downloading)); err != nil {
 			return songInfo, err
 		}
@@ -474,6 +465,8 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 			return songInfo, err
 		}
 	}
+
+	task.setPhase(phaseProcessing)
 
 	// 音频下载成功后立即注册清理，确保后续任一步骤失败都不残留临时文件
 	var picPath, resizePicPath, newDir string
@@ -551,7 +544,12 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		return songInfo, err
 	}
 
-	progress, stopProgress := a.watchUpload(status, songInfo, interval)
+	task.setPhase(phaseUploading)
+	showUpload, stopProgress := a.watchUpload(status, songInfo, interval)
+	progress := func(sent, total int64) {
+		task.progress(phaseUploading, sent, total)
+		showUpload(sent, total)
+	}
 	audio, err := a.sendMusic(ctx, songInfo, track, filePath, resizePicPath, chatID, reply, progress)
 	stopProgress()
 	if err != nil {

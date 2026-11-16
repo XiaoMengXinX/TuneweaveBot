@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"time"
 	"unicode/utf16"
 )
 
@@ -314,6 +315,48 @@ func StatusInfo(chatTitle, chatUsername string, chatID, userID, total, chatCount
 		total, chatInfo, chatCount, userID, userID, userCount)
 }
 
+// RuntimeInfo 是 /status 中的运行状态：进程运行时长与内存占用。
+func RuntimeInfo(uptime time.Duration, sys, heap uint64) string {
+	return fmt.Sprintf("<b>[运行状态]</b>\n运行时长: %s\n内存占用: %s（堆 %s）", Uptime(uptime), Bytes(sys), Bytes(heap))
+}
+
+// Uptime 取最大的两级单位，如 "3天4小时"、"5分钟"。
+func Uptime(d time.Duration) string {
+	parts := []struct {
+		n    int64
+		unit string
+	}{
+		{int64(d / (24 * time.Hour)), "天"},
+		{int64(d % (24 * time.Hour) / time.Hour), "小时"},
+		{int64(d % time.Hour / time.Minute), "分钟"},
+	}
+	for i, p := range parts {
+		if p.n == 0 {
+			continue
+		}
+		text := fmt.Sprintf("%d%s", p.n, p.unit)
+		if i+1 < len(parts) && parts[i+1].n > 0 {
+			text += fmt.Sprintf("%d%s", parts[i+1].n, parts[i+1].unit)
+		}
+		return text
+	}
+	return fmt.Sprintf("%d秒", int64(d/time.Second))
+}
+
+// Bytes 以 1024 进制格式化字节数，如 "86.3 MB"。
+func Bytes(n uint64) string {
+	value, units := float64(n), []string{"B", "KB", "MB", "GB", "TB"}
+	i := 0
+	for value >= 1024 && i < len(units)-1 {
+		value /= 1024
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%d B", n)
+	}
+	return fmt.Sprintf("%.1f %s", value, units[i])
+}
+
 func CacheChatSet(chatID int64) string {
 	return fmt.Sprintf("缓存群已设置为 <code>%d</code>", chatID)
 }
@@ -362,9 +405,7 @@ func AuthLine(name string, available bool) string {
 }
 
 const (
-	LoginNoSessionWeb = "当前没有进行中的登录会话"
-
-	WebAppButton  = "看板"
-	WebAppOpen    = "打开看板"
-	WebAppWelcome = "点击下方按钮打开看板，查看点过的歌曲或搜索点歌。"
+	WebAppButton  = "面板"
+	WebAppOpen    = "打开面板"
+	WebAppWelcome = "点击下方按钮打开面板，查看点过的歌曲或搜索点歌。"
 )

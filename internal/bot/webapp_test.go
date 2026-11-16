@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -165,5 +167,65 @@ func TestWebAppGuard(t *testing.T) {
 	done()
 	if _, ok := a.web.guard.beginMusic(7); !ok {
 		t.Error("任务结束后应可再次登记")
+	}
+}
+
+func TestReadLogs(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("2026-11-16.log", "2026/11/16 09:00:00 [INFO] 昨天 (app.go:1)\n")
+	write("2026-11-17.log", "2026/11/17 10:00:00 [INFO] 启动 (app.go:1)\n"+
+		"2026/11/17 10:00:01 [ERROR] panic: boom\n堆栈第一行 (middleware.go:19)\n")
+	write("notes.txt", "不是日志")
+
+	days, err := logDays(dir)
+	if err != nil || !slices.Equal(days, []string{"2026-11-17", "2026-11-16"}) {
+		t.Fatalf("logDays = %v, %v", days, err)
+	}
+
+	// 只读指定日期的文件，新的在前，跨行消息并入同一条
+	entries, err := readLogs(dir, "2026-11-17", "")
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("readLogs = %+v, %v", entries, err)
+	}
+	if got := entries[0]; got.Level != "ERROR" || got.Message != "panic: boom\n堆栈第一行" || got.Caller != "middleware.go:19" {
+		t.Errorf("跨行日志解析错误: %+v", got)
+	}
+	if entries, _ := readLogs(dir, "2026-11-17", "INFO"); len(entries) != 1 || entries[0].Message != "启动" {
+		t.Errorf("按级别筛选错误: %+v", entries)
+	}
+	if entries, err := readLogs(dir, "2026-11-15", ""); err != nil || len(entries) != 0 {
+		t.Errorf("没有日志的日期应返回空: %+v, %v", entries, err)
+	}
+	for _, day := range []string{"../config", "2026-11-17/../../x", "2026-1-7", ""} {
+		if logDay.MatchString(day) {
+			t.Errorf("%q 不应被接受为日期", day)
+		}
+	}
+}
+
+func TestWebAppErrorLanguage(t *testing.T) {
+	a := newTestApp(nil)
+	a.web.guard = newWebGuard()
+	srv := httptest.NewServer(a.guard(a.webHandler()))
+	t.Cleanup(srv.Close)
+	for lang, want := range map[string]string{"": msgNotInTelegram.zh, "zh": msgNotInTelegram.zh, "en": msgNotInTelegram.en} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/me", nil)
+		req.Header.Set("X-Language", lang)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]string
+		_ = json.NewDecoder(res.Body).Decode(&body)
+		res.Body.Close()
+		if body["error"] != want {
+			t.Errorf("X-Language %q: error = %q, want %q", lang, body["error"], want)
+		}
 	}
 }

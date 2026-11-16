@@ -1,11 +1,13 @@
 package bot
 
 import (
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -17,9 +19,8 @@ type logEntry struct {
 }
 
 const (
-	// 看板展示的"最近日志"范围：最近 logMaxFiles 天的日志文件，每个取末尾 logTailBytes，
-	// 最多返回 logMaxEntries 条。页面会定时轮询，读取量须有上限。
-	logMaxFiles   = 3
+	// 面板每次展示一天的日志：取该日文件末尾 logTailBytes，最多返回 logMaxEntries 条。
+	// 页面开启实时刷新时会定时轮询，读取量须有上限。
 	logTailBytes  = 512 << 10
 	logMaxEntries = 300
 )
@@ -30,31 +31,40 @@ var (
 	logCaller = regexp.MustCompile(` \(([^()\s]+:\d+)\)$`)
 )
 
-// readLogs 从日志目录读取最近的日志，新的在前；level 非空时只保留该级别。
-// 当天的日志不足时继续读更早的文件。
-func readLogs(dir, level string) ([]logEntry, error) {
-	files, err := filepath.Glob(filepath.Join(dir, "*.log"))
+// logDay 匹配日志文件名中的日期；也用来校验前端传入的日期，避免拼出目录之外的路径。
+var logDay = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// logDays 列出有日志文件的日期，新的在前。
+func logDays(dir string) ([]string, error) {
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
-	// 文件名是日期，倒序即从新到旧
-	sort.Sort(sort.Reverse(sort.StringSlice(files)))
-	files = files[:min(len(files), logMaxFiles)]
-	var out []logEntry
-	for _, file := range files {
-		text, err := readTail(file, logTailBytes)
-		if err != nil {
-			return out, err
+	var days []string
+	for _, f := range files {
+		if day, ok := strings.CutSuffix(f.Name(), ".log"); ok && logDay.MatchString(day) {
+			days = append(days, day)
 		}
-		entries := parseLogs(text)
-		for i := len(entries) - 1; i >= 0; i-- {
-			if level != "" && entries[i].Level != level {
-				continue
-			}
+	}
+	slices.Sort(days)
+	slices.Reverse(days)
+	return days, nil
+}
+
+// readLogs 读取某一天的日志，新的在前；level 非空时只保留该级别。当天没有日志文件时返回空。
+func readLogs(dir, day, level string) ([]logEntry, error) {
+	text, err := readTail(filepath.Join(dir, day+".log"), logTailBytes)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []logEntry
+	entries := parseLogs(text)
+	for i := len(entries) - 1; i >= 0 && len(out) < logMaxEntries; i-- {
+		if level == "" || entries[i].Level == level {
 			out = append(out, entries[i])
-			if len(out) == logMaxEntries {
-				return out, nil
-			}
 		}
 	}
 	return out, nil

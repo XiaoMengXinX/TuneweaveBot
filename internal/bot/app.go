@@ -29,6 +29,9 @@ import (
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
 )
 
+// startedAt 是进程启动时间，重载不重置。
+var startedAt = time.Now()
+
 // ErrReload /reload 触发的取消原因
 var ErrReload = errors.New("reload requested")
 
@@ -78,10 +81,8 @@ type App struct {
 	cooldownMu    sync.Mutex                    // 保护 cooldowns
 	cooldowns     map[cooldownKey]time.Time     // 冷却截止时间
 	inflight      sync.WaitGroup                // 在途 handler，优雅退出时等待
-	// 下载位的占用与排队数
-	downloadsActive  atomic.Int64
-	downloadsWaiting atomic.Int64
-	web              webState
+	downloads     downloadTracker               // 排队与进行中的下载任务
+	web           webState
 }
 
 // Run 阻塞运行 bot，返回 true 表示需重载配置
@@ -181,7 +182,7 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 	stopWebApp := func(time.Duration) {}
 	if cfg.WebApp.Enabled() {
 		if stopWebApp, err = a.startWebApp(runCtx); err != nil {
-			return false, fmt.Errorf("启动看板服务失败: %w", err)
+			return false, fmt.Errorf("启动面板服务失败: %w", err)
 		}
 		a.setupWebAppEntry(runCtx)
 	}
@@ -194,7 +195,7 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 	// 等在途 handler 结束再由 defer 关闭 store 与插件，避免用到已关闭的资源。
 	// 重载时让当前任务正常完成；进程退出时 handler 已随 runCtx 取消，只需短暂等待。
 	reload := runCtx.Err() == nil && errors.Is(context.Cause(pollCtx), ErrReload)
-	// 看板服务先停：它不再接收请求之后，才不会有新的在途任务登记进来
+	// 面板服务先停：它不再接收请求之后，才不会有新的在途任务登记进来
 	if reload {
 		log.Infoln("已停止接收新消息，等待当前任务完成后重载")
 		stopWebApp(reloadDrainTimeout)

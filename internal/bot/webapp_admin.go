@@ -43,7 +43,7 @@ func (a *App) apiStatus(r *http.Request, user webapp.User) (any, error) {
 		}
 		providers = append(providers, status)
 	}
-	total, err := a.store.Total()
+	total, size, err := a.store.CacheTotals()
 	if err != nil {
 		return nil, err
 	}
@@ -53,20 +53,17 @@ func (a *App) apiStatus(r *http.Request, user webapp.User) (any, error) {
 		cacheChatName = a.chatName(r.Context(), cacheChat)
 	}
 	return map[string]any{
-		"version":    a.build.VersionName,
-		"commit":     a.build.CommitSHA,
-		"build_time": a.build.BuildTime,
-		"runtime":    a.build.RuntimeVer,
-		"arch":       a.build.BuildArch,
-		"started_at": startedAt.Unix(),
-		"providers":  providers,
-		"downloads": map[string]any{
-			"active":  a.downloadsActive.Load(),
-			"waiting": a.downloadsWaiting.Load(),
-			"limit":   a.cfg.Download.Concurrency,
-		},
+		"version":        a.build.VersionName,
+		"commit":         a.build.CommitSHA,
+		"build_time":     a.build.BuildTime,
+		"runtime":        a.build.RuntimeVer,
+		"arch":           a.build.BuildArch,
+		"started_at":     startedAt.Unix(),
+		"providers":      providers,
+		"memory":         memoryUsage(),
 		"cache_chat":     map[string]any{"id": cacheChat, "name": cacheChatName},
 		"cache_total":    total,
+		"cache_size":     size,
 		"db_size":        fileSize(a.cfg.Database.Path) + fileSize(a.cfg.Database.Path+"-wal"),
 		"cache_dir_size": dirSize(a.cacheDir),
 	}, nil
@@ -78,6 +75,11 @@ func nonNil[T any](s []T) []T {
 		return []T{}
 	}
 	return s
+}
+
+// apiDownloads 返回排队与进行中的下载任务，面板以秒级间隔轮询。
+func (a *App) apiDownloads(r *http.Request, user webapp.User) (any, error) {
+	return map[string]any{"limit": a.cfg.Download.Concurrency, "tasks": a.downloads.snapshot()}, nil
 }
 
 func fileSize(path string) int64 {
@@ -146,12 +148,12 @@ func (a *App) apiStats(r *http.Request, user webapp.User) (any, error) {
 	q := r.URL.Query()
 	days, _ := strconv.Atoi(q.Get("days"))
 	if !slices.Contains([]int{7, 30, 90}, days) {
-		return nil, badRequest("days 须为 7、30 或 90")
+		return nil, badRequest(msgStatsDays)
 	}
 	key := statsKey{days, q.Get("provider")}
 	if key.provider != "" {
 		if _, ok := a.providers.Get(key.provider); !ok {
-			return nil, badRequest("未知的平台")
+			return nil, badRequest(msgUnknownProvider)
 		}
 	}
 
@@ -235,7 +237,7 @@ func (a *App) cacheRow(r *http.Request) (store.SongInfo, error) {
 	id, _ := strconv.ParseUint(r.PathValue("id"), 10, 64)
 	song, ok := a.store.GetByID(uint(id))
 	if !ok {
-		return song, notFound(render.NoCache)
+		return song, notFound(msgNoCache)
 	}
 	return song, nil
 }
@@ -269,7 +271,7 @@ func (a *App) apiCacheDelete(r *http.Request, user webapp.User) (any, error) {
 	if _, _, err := a.store.DeleteByRef(song.Provider, song.TrackID); err != nil {
 		return nil, err
 	}
-	a.log.Printf("管理员 %d 从看板清除缓存: %s %s [%s]", user.ID, song.Provider, song.TrackID, song.SongName)
+	a.log.Printf("管理员 %d 从面板清除缓存: %s %s [%s]", user.ID, song.Provider, song.TrackID, song.SongName)
 	return nil, nil
 }
 
@@ -323,7 +325,7 @@ func (a *App) apiPlugins(r *http.Request, user webapp.User) (any, error) {
 func (a *App) apiPluginManifest(r *http.Request, user webapp.User) (any, error) {
 	manifest, ok := a.plugins.ManifestJSON(r.PathValue("name"))
 	if !ok {
-		return nil, notFound("插件不存在")
+		return nil, notFound(msgPluginNotFound)
 	}
 	return map[string]any{"manifest": json.RawMessage(manifest)}, nil
 }
@@ -366,10 +368,10 @@ func (a *App) apiPluginUpdate(r *http.Request, user webapp.User) (any, error) {
 		return nil, err
 	}
 	if len(req.Names) == 0 {
-		return nil, badRequest("未指定插件")
+		return nil, badRequest(msgNoPluginSelected)
 	}
 	if !a.updating.CompareAndSwap(false, true) {
-		return nil, conflict(render.UpdateBusy)
+		return nil, conflict(msgUpdateBusy)
 	}
 	defer a.updating.Store(false)
 
@@ -393,7 +395,7 @@ func (a *App) apiPluginUpdate(r *http.Request, user webapp.User) (any, error) {
 }
 
 func (a *App) apiReload(r *http.Request, user webapp.User) (any, error) {
-	a.log.Printf("管理员 %d 从看板触发重载", user.ID)
+	a.log.Printf("管理员 %d 从面板触发重载", user.ID)
 	a.requestReload()
 	return nil, nil
 }
@@ -408,11 +410,11 @@ func (a *App) apiSetCacheChat(r *http.Request, user webapp.User) (any, error) {
 	persistErr, err := a.setCacheChat(r.Context(), req.ChatID, true)
 	if err != nil {
 		a.log.Errorln(err)
-		return nil, &apiError{http.StatusBadGateway, render.CacheChatUnreachable}
+		return nil, &apiError{http.StatusBadGateway, msgCacheChatFailed}
 	}
 	var warning string
 	if persistErr != nil {
-		warning = "配置文件写入失败，本次设置已生效，重启后将失效"
+		warning = msgCacheChatPersist.in(r)
 	}
 	return map[string]any{"chat_id": req.ChatID, "warning": warning}, nil
 }
@@ -534,14 +536,26 @@ func newConfigItem(key string, value any, secret bool) configItem {
 	return configItem{Key: key, Value: text}
 }
 
+// apiLogs 返回某一天的日志，缺省为当天；dates 是可切换的日期，当天始终在内。
 func (a *App) apiLogs(r *http.Request, user webapp.User) (any, error) {
-	level := strings.ToUpper(r.URL.Query().Get("level"))
-	entries, err := readLogs(a.cfg.Log.Path, level)
+	q := r.URL.Query()
+	today := time.Now().Format(time.DateOnly)
+	day := q.Get("date")
+	if day == "" {
+		day = today
+	} else if !logDay.MatchString(day) {
+		return nil, badRequest(msgBadDate)
+	}
+	days, err := logDays(a.cfg.Log.Path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	if entries == nil {
-		entries = []logEntry{}
+	if !slices.Contains(days, today) {
+		days = append([]string{today}, days...)
 	}
-	return map[string]any{"entries": entries}, nil
+	entries, err := readLogs(a.cfg.Log.Path, day, strings.ToUpper(q.Get("level")))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"date": day, "today": today, "dates": days, "entries": nonNil(entries)}, nil
 }

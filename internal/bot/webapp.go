@@ -21,10 +21,7 @@ import (
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/webapp"
 )
 
-// startedAt 是进程启动时间，重载不重置。
-var startedAt = time.Now()
-
-// webState 是看板独有的运行时状态。
+// webState 是面板独有的运行时状态。
 type webState struct {
 	guard   *webGuard
 	statsMu sync.Mutex
@@ -35,7 +32,7 @@ type webState struct {
 	login   *webLogin
 }
 
-// startWebApp 监听 [webapp] listen 并在后台提供看板服务，返回的函数停止接收新请求并等待
+// startWebApp 监听 [webapp] listen 并在后台提供面板服务，返回的函数停止接收新请求并等待
 // 在途请求结束，最多等待 timeout。baseCtx 在进程退出时取消。
 func (a *App) startWebApp(baseCtx context.Context) (stop func(timeout time.Duration), err error) {
 	ln, err := net.Listen("tcp", a.cfg.WebApp.Listen)
@@ -43,11 +40,11 @@ func (a *App) startWebApp(baseCtx context.Context) (stop func(timeout time.Durat
 		return nil, err
 	}
 	if !webapp.Built() {
-		a.log.Warnln("二进制未包含看板前端，请用 build.sh 构建；看板页面暂不可用")
+		a.log.Warnln("二进制未包含面板前端，请用 build.sh 构建；面板页面暂不可用")
 	}
 	if host, _, _ := net.SplitHostPort(a.cfg.WebApp.Listen); host != "localhost" {
 		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
-			a.log.Warnf("看板服务监听在 %s，本机以外也能直接访问；建议只监听 127.0.0.1，由 cloudflared 或反向代理转发", a.cfg.WebApp.Listen)
+			a.log.Warnf("面板服务监听在 %s，本机以外也能直接访问；建议只监听 127.0.0.1，由 cloudflared 或反向代理转发", a.cfg.WebApp.Listen)
 		}
 	}
 	a.web.guard = newWebGuard()
@@ -62,21 +59,21 @@ func (a *App) startWebApp(baseCtx context.Context) (stop func(timeout time.Durat
 	}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			a.log.Errorf("看板服务异常退出: %v", err)
+			a.log.Errorf("面板服务异常退出: %v", err)
 		}
 	}()
-	a.log.Printf("看板服务已启动: %s -> %s", a.cfg.WebApp.Listen, a.cfg.WebApp.URL)
+	a.log.Printf("面板服务已启动: %s -> %s", a.cfg.WebApp.Listen, a.cfg.WebApp.URL)
 	return func(timeout time.Duration) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
-			a.log.Warnln("等待看板请求结束超时，强制关闭")
+			a.log.Warnln("等待面板请求结束超时，强制关闭")
 			_ = srv.Close()
 		}
 	}, nil
 }
 
-// setupWebAppEntry 把 bot 的 Menu Button 设为打开看板。
+// setupWebAppEntry 把 bot 的 Menu Button 设为打开面板。
 func (a *App) setupWebAppEntry(ctx context.Context) {
 	if _, err := a.tg.SetChatMenuButton(ctx, &tgb.SetChatMenuButtonParams{
 		MenuButton: models.MenuButtonWebApp{
@@ -108,6 +105,7 @@ func (a *App) webHandler() http.Handler {
 	user("POST /api/music", a.apiMusic)
 
 	admin("GET /api/admin/status", a.apiStatus)
+	admin("GET /api/admin/downloads", a.apiDownloads)
 	admin("GET /api/admin/stats", a.apiStats)
 	admin("GET /api/admin/cache", a.apiCacheList)
 	admin("GET /api/admin/cache/{id}", a.apiCacheDetail)
@@ -127,7 +125,7 @@ func (a *App) webHandler() http.Handler {
 	admin("GET /api/admin/logs", a.apiLogs)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "接口不存在"})
+		writeError(w, r, http.StatusNotFound, msgNotFoundAPI)
 	})
 	mux.Handle("/", webapp.Static())
 	return mux
@@ -136,17 +134,17 @@ func (a *App) webHandler() http.Handler {
 // apiFunc 处理一个已通过身份校验的请求，返回值编码为 JSON。
 type apiFunc func(r *http.Request, user webapp.User) (any, error)
 
-// apiError 是返回给前端的错误，Message 直接展示给用户。
+// apiError 是返回给前端的错误，Text 直接展示给用户。
 type apiError struct {
-	Status  int
-	Message string
+	Status int
+	Text   webText
 }
 
-func (e *apiError) Error() string { return e.Message }
+func (e *apiError) Error() string { return e.Text.zh }
 
-func badRequest(message string) error { return &apiError{http.StatusBadRequest, message} }
-func notFound(message string) error   { return &apiError{http.StatusNotFound, message} }
-func conflict(message string) error   { return &apiError{http.StatusConflict, message} }
+func badRequest(text webText) error { return &apiError{http.StatusBadRequest, text} }
+func notFound(text webText) error   { return &apiError{http.StatusNotFound, text} }
+func conflict(text webText) error   { return &apiError{http.StatusConflict, text} }
 
 const (
 	initDataScheme  = "tma "
@@ -168,26 +166,26 @@ func (a *App) api(adminOnly bool, timeout time.Duration, fn apiFunc) http.Handle
 		defer func() {
 			if rec := recover(); rec != nil {
 				a.log.Errorf("panic: %v\n%s", rec, debug.Stack())
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "服务器内部错误"})
+				writeError(w, r, http.StatusInternalServerError, msgInternal)
 			}
 		}()
 		w.Header().Set("Cache-Control", "no-store")
 		initData, ok := strings.CutPrefix(r.Header.Get("Authorization"), initDataScheme)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "请在 Telegram 中打开"})
+			writeError(w, r, http.StatusUnauthorized, msgNotInTelegram)
 			return
 		}
 		user, err := webapp.ValidateInitData(initData, a.cfg.Bot.Token, time.Now())
 		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "身份校验失败，请重新打开看板"})
+			writeError(w, r, http.StatusUnauthorized, msgAuthFailed)
 			return
 		}
 		if ok, retryAfter := a.web.guard.byUser.allow(user.ID, time.Now()); !ok {
-			tooManyRequests(w, retryAfter)
+			tooManyRequests(w, r, retryAfter)
 			return
 		}
 		if adminOnly && !a.isAdmin(user.ID) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "需要管理员权限"})
+			writeError(w, r, http.StatusForbidden, msgAdminOnly)
 			return
 		}
 
@@ -202,13 +200,13 @@ func (a *App) api(adminOnly bool, timeout time.Duration, fn apiFunc) http.Handle
 			var limited *rateLimitError
 			switch {
 			case errors.As(err, &limited):
-				tooManyRequests(w, limited.retryAfter)
+				tooManyRequests(w, r, limited.retryAfter)
 				return
 			case !errors.As(err, &apiErr):
-				a.log.Errorf("看板 %s %s: %v", r.Method, r.URL.Path, err)
-				apiErr = &apiError{http.StatusInternalServerError, "服务器内部错误"}
+				a.log.Errorf("面板 %s %s: %v", r.Method, r.URL.Path, err)
+				apiErr = &apiError{http.StatusInternalServerError, msgInternal}
 			}
-			writeJSON(w, apiErr.Status, map[string]string{"error": apiErr.Message})
+			writeError(w, r, apiErr.Status, apiErr.Text)
 			return
 		}
 		if result == nil {
@@ -233,7 +231,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func decodeBody(r *http.Request, v any) error {
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		return badRequest("请求格式错误")
+		return badRequest(msgBadRequest)
 	}
 	return nil
 }
@@ -250,7 +248,7 @@ func pageParams(r *http.Request) (limit, offset int) {
 	return limit, max(offset, 0)
 }
 
-// songDTO 是看板展示的缓存歌曲。
+// songDTO 是面板展示的缓存歌曲。
 type songDTO struct {
 	ID           uint   `json:"id"`
 	Provider     string `json:"provider"`
@@ -280,7 +278,7 @@ func (a *App) songDTO(s store.SongInfo) songDTO {
 }
 
 // goInflight 在后台执行 fn 并登记为在途任务，重载与退出时等它结束。
-// 只能在 HTTP 请求处理中调用：看板服务先于在途任务的等待停止，不会与 Wait 竞争。
+// 只能在 HTTP 请求处理中调用：面板服务先于在途任务的等待停止，不会与 Wait 竞争。
 func (a *App) goInflight(fn func(ctx context.Context)) {
 	a.inflight.Add(1)
 	go func() {

@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/provider"
-	"github.com/XiaoMengXinX/TuneweaveBot/internal/render"
+	"github.com/XiaoMengXinX/TuneweaveBot/internal/store"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/textx"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/webapp"
 )
@@ -50,7 +50,7 @@ func (a *App) apiOverview(r *http.Request, user webapp.User) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	total, err := a.store.Total()
+	total, _, err := a.store.CacheTotals()
 	if err != nil {
 		return nil, err
 	}
@@ -66,9 +66,9 @@ func (a *App) apiSongs(r *http.Request, user webapp.User) (any, error) {
 	limit, offset := pageParams(r)
 	q := r.URL.Query()
 	if utf8.RuneCountInString(q.Get("q")) > maxKeywordRunes {
-		return nil, badRequest("关键词太长")
+		return nil, badRequest(msgKeywordTooLong)
 	}
-	songs, total, err := a.store.UserSongs(user.ID, q.Get("q"), q.Get("order") == "asc", limit, offset)
+	songs, total, err := a.store.UserSongs(user.ID, q.Get("q"), store.SongOrder(q.Get("order")), limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -95,22 +95,22 @@ func (a *App) apiSearch(r *http.Request, user webapp.User) (any, error) {
 	q := r.URL.Query()
 	keyword := strings.TrimSpace(q.Get("q"))
 	if keyword == "" {
-		return nil, badRequest(render.InputKeyword)
+		return nil, badRequest(msgInputKeyword)
 	}
 	if utf8.RuneCountInString(keyword) > maxKeywordRunes {
-		return nil, badRequest("关键词太长")
+		return nil, badRequest(msgKeywordTooLong)
 	}
 	providerName := q.Get("provider")
 	if providerName != "" {
 		if _, ok := a.providers.Get(providerName); !ok {
-			return nil, badRequest("未知的平台")
+			return nil, badRequest(msgUnknownProvider)
 		}
 	}
 	// 与 /search 命令一致，最多翻到第 searchMaxPage 页
 	const maxResults = searchMaxPage * searchPageSize
 	_, offset := pageParams(r)
 	if offset >= maxResults {
-		return nil, badRequest(render.NoMoreResults)
+		return nil, badRequest(msgNoMoreResults)
 	}
 	if ok, retryAfter := a.web.guard.bySearch.allow(user.ID, time.Now()); !ok {
 		return nil, &rateLimitError{retryAfter}
@@ -119,12 +119,12 @@ func (a *App) apiSearch(r *http.Request, user webapp.User) (any, error) {
 	case a.web.guard.search <- struct{}{}:
 		defer func() { <-a.web.guard.search }()
 	default:
-		return nil, &apiError{http.StatusServiceUnavailable, "搜索繁忙，请稍后再试"}
+		return nil, &apiError{http.StatusServiceUnavailable, msgSearchBusy}
 	}
 	summaries, total, err := a.providers.Search(r.Context(), providerName, keyword, searchPageSize, offset)
 	if err != nil {
 		a.log.Errorln(err)
-		return nil, &apiError{http.StatusBadGateway, "搜索失败，请稍后重试"}
+		return nil, &apiError{http.StatusBadGateway, msgSearchFailed}
 	}
 	total = min(total, maxResults)
 	type item struct {
@@ -165,15 +165,15 @@ func (a *App) apiMusic(r *http.Request, user webapp.User) (any, error) {
 		return nil, err
 	}
 	if _, ok := a.providers.Get(req.Provider); !ok || req.ID == "" || len(req.ID) > maxRefBytes || len(req.Sub) > maxRefBytes {
-		return nil, badRequest("歌曲不存在")
+		return nil, badRequest(msgSongNotFound)
 	}
 	done, ok := a.web.guard.beginMusic(user.ID)
 	if !ok {
-		return nil, &apiError{http.StatusTooManyRequests, "上一首歌还在处理中，完成后再点下一首"}
+		return nil, &apiError{http.StatusTooManyRequests, msgMusicBusy}
 	}
 	if remain := a.cooldown("music", user.ID, searchMusicCooldown); remain > 0 {
 		done()
-		return nil, &apiError{http.StatusTooManyRequests, render.Cooldown(int(math.Ceil(remain.Seconds())))}
+		return nil, &apiError{http.StatusTooManyRequests, msgCooldown(int(math.Ceil(remain.Seconds())))}
 	}
 	ref := provider.Ref{Provider: req.Provider, ID: req.ID, Sub: req.Sub}
 	target := musicTarget{

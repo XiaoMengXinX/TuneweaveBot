@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -42,8 +43,18 @@ func TestRequestsAndStats(t *testing.T) {
 	if err != nil || summary != (UserSummary{Songs: 2, Duration: 300, Size: 1510}) {
 		t.Fatalf("UserSummary = %+v, %v", summary, err)
 	}
+	// 导入的旧数据里封面大小可能为 NULL，不能让整行的大小丢失
+	if err := s.db.Exec("UPDATE song_infos SET emb_pic_size = NULL WHERE id = ?", b.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if songs, size, err := s.CacheTotals(); err != nil || songs != 2 || size != 1510 {
+		t.Fatalf("CacheTotals = %d 首 / %d 字节, %v", songs, size, err)
+	}
+	if summary, _ := s.UserSummary(7); summary.Size != 1510 {
+		t.Fatalf("含 NULL 列时 UserSummary.Size = %d, want 1510", summary.Size)
+	}
 
-	songs, total, err := s.UserSongs(7, "", false, 10, 0)
+	songs, total, err := s.UserSongs(7, "", OrderRecent, 10, 0)
 	if err != nil || total != 2 || len(songs) != 2 {
 		t.Fatalf("UserSongs = %d 首 / total %d, %v", len(songs), total, err)
 	}
@@ -52,8 +63,26 @@ func TestRequestsAndStats(t *testing.T) {
 			t.Errorf("点歌次数与时间错误: %+v", song)
 		}
 	}
+	// 按歌名排序：英文不区分大小写，中文在英文之后
+	names := func(order SongOrder) []string {
+		songs, _, _ := s.UserSongs(7, "", order, 10, 0)
+		var out []string
+		for _, song := range songs {
+			out = append(out, song.SongName)
+		}
+		return out
+	}
+	if got := names(OrderTitleAsc); !slices.Equal(got, []string{"100%_love", "晴天"}) {
+		t.Errorf("A-Z = %v", got)
+	}
+	if got := names(OrderTitleDesc); !slices.Equal(got, []string{"晴天", "100%_love"}) {
+		t.Errorf("Z-A = %v", got)
+	}
+	if got, want := names("unknown"), names(OrderRecent); !slices.Equal(got, want) {
+		t.Errorf("未知排序应按最近点歌, got %v want %v", got, want)
+	}
 	// % 与 _ 按字面匹配
-	if songs, total, _ := s.UserSongs(7, "100%_", false, 10, 0); total != 1 || songs[0].ID != b.ID {
+	if songs, total, _ := s.UserSongs(7, "100%_", OrderRecent, 10, 0); total != 1 || songs[0].ID != b.ID {
 		t.Errorf("搜索结果错误: total %d", total)
 	}
 	if _, total, _ := s.ListSongs("周杰伦", "netease", 10, 0); total != 1 {
@@ -89,7 +118,7 @@ func TestRequestsAndStats(t *testing.T) {
 	if _, _, err := s.DeleteByRef("qq", "2"); err != nil {
 		t.Fatal(err)
 	}
-	if _, total, _ := s.UserSongs(7, "", false, 10, 0); total != 1 {
+	if _, total, _ := s.UserSongs(7, "", OrderRecent, 10, 0); total != 1 {
 		t.Errorf("删除后 total = %d, want 1", total)
 	}
 }

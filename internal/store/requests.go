@@ -32,11 +32,17 @@ func (s *Store) GetByID(id uint) (SongInfo, bool) {
 	return songInfo, true
 }
 
-// Total 返回缓存歌曲总数。
-func (s *Store) Total() (total int64, err error) {
-	err = s.db.Model(&SongInfo{}).Count(&total).Error
-	return total, err
+// CacheTotals 返回缓存歌曲的数量与文件总大小（字节）。
+func (s *Store) CacheTotals() (songs, size int64, err error) {
+	var out struct{ Songs, Size int64 }
+	err = s.db.Raw(`SELECT COUNT(*) AS songs, COALESCE(SUM(` + songSizeExpr + `), 0) AS size
+		FROM song_infos WHERE deleted_at IS NULL`).Scan(&out).Error
+	return out.Songs, out.Size, err
 }
+
+// songSizeExpr 是一首歌发送到 Telegram 的文件大小：音频加嵌入的封面。
+// 导入的旧数据里这两列可能为 NULL。
+const songSizeExpr = `COALESCE(music_size, 0) + COALESCE(emb_pic_size, 0)`
 
 // UserSummary 是某个用户点过的歌曲（去重）的汇总。
 type UserSummary struct {
@@ -48,7 +54,7 @@ type UserSummary struct {
 func (s *Store) UserSummary(userID int64) (UserSummary, error) {
 	var out UserSummary
 	err := s.db.Raw(`SELECT COUNT(*) AS songs, COALESCE(SUM(duration), 0) AS duration,
-		COALESCE(SUM(music_size + emb_pic_size), 0) AS size
+		COALESCE(SUM(`+songSizeExpr+`), 0) AS size
 		FROM song_infos WHERE deleted_at IS NULL
 		AND id IN (SELECT DISTINCT song_id FROM song_requests WHERE user_id = ?)`, userID).Scan(&out).Error
 	return out, err
@@ -61,8 +67,27 @@ type UserSong struct {
 	Times  int64
 }
 
-// UserSongs 按最近点歌时间列出用户点过的歌曲，query 非空时匹配歌名、歌手与专辑。
-func (s *Store) UserSongs(userID int64, query string, oldestFirst bool, limit, offset int) (songs []UserSong, total int64, err error) {
+// SongOrder 是用户歌曲列表的排序方式。
+type SongOrder string
+
+const (
+	OrderRecent    SongOrder = "recent" // 最近点的在前
+	OrderOldest    SongOrder = "oldest" // 最早点的在前
+	OrderTitleAsc  SongOrder = "az"     // 按歌名 A-Z
+	OrderTitleDesc SongOrder = "za"     // 按歌名 Z-A
+)
+
+// songOrderSQL 是各排序方式的 ORDER BY 子句。歌名按 Unicode 码位比较，英文不区分大小写；
+// 中文按码位而不是拼音排序，排在英文之后。歌名相同时最近点的在前。
+var songOrderSQL = map[SongOrder]string{
+	OrderRecent:    "r.last_at DESC, s.id DESC",
+	OrderOldest:    "r.last_at ASC, s.id ASC",
+	OrderTitleAsc:  "s.song_name COLLATE NOCASE ASC, r.last_at DESC, s.id DESC",
+	OrderTitleDesc: "s.song_name COLLATE NOCASE DESC, r.last_at DESC, s.id DESC",
+}
+
+// UserSongs 列出用户点过的歌曲，未知的 order 按 OrderRecent 处理；query 非空时匹配歌名、歌手与专辑。
+func (s *Store) UserSongs(userID int64, query string, order SongOrder, limit, offset int) (songs []UserSong, total int64, err error) {
 	base := func() *gorm.DB {
 		tx := s.db.Table("song_infos AS s").
 			Joins(`JOIN (SELECT song_id, MAX(created_at) AS last_at, COUNT(*) AS times
@@ -73,11 +98,11 @@ func (s *Store) UserSongs(userID int64, query string, oldestFirst bool, limit, o
 	if err := base().Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	order := "r.last_at DESC, s.id DESC"
-	if oldestFirst {
-		order = "r.last_at ASC, s.id ASC"
+	orderBy, ok := songOrderSQL[order]
+	if !ok {
+		orderBy = songOrderSQL[OrderRecent]
 	}
-	err = base().Select("s.*, r.last_at, r.times").Order(order).Limit(limit).Offset(offset).Scan(&songs).Error
+	err = base().Select("s.*, r.last_at, r.times").Order(orderBy).Limit(limit).Offset(offset).Scan(&songs).Error
 	return songs, total, err
 }
 
