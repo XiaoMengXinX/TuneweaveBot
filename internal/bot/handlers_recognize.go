@@ -70,7 +70,7 @@ func (a *App) handleRecognize(ctx context.Context, tg *tgb.Bot, update *models.U
 		}
 	}
 	shown := false
-	if err := a.processMusic(ctx, *ref, voice, func(info store.SongInfo) {
+	if err := a.processMusic(ctx, *ref, messageTarget(voice, sourceCommand), func(info store.SongInfo) {
 		showResult(render.RecognizeResult(info.SongName, info.SongArtists, info.SongAlbum))
 		shown = true
 	}); err != nil {

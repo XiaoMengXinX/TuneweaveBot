@@ -147,7 +147,7 @@ func TestProcessCachedProgramKeyboard(t *testing.T) {
 		{Provider: "netease", ID: "123"},
 		{Provider: "netease", ID: "2061", Sub: "program"},
 	} {
-		if err := a.processMusic(t.Context(), ref, &models.Message{ID: 1, Chat: models.Chat{ID: 42}}, nil); err != nil {
+		if err := a.processMusic(t.Context(), ref, messageTarget(&models.Message{ID: 1, Chat: models.Chat{ID: 42}}, sourceCommand), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -202,7 +202,7 @@ func TestResolveAuthRequiredPausesDownloads(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	a.store = st
 
-	err = a.processMusic(t.Context(), provider.Ref{Provider: fakeProviderName, ID: "123"}, &models.Message{ID: 1, Chat: models.Chat{ID: 42}}, nil)
+	err = a.processMusic(t.Context(), provider.Ref{Provider: fakeProviderName, ID: "123"}, messageTarget(&models.Message{ID: 1, Chat: models.Chat{ID: 42}}, sourceCommand), nil)
 	if !errors.Is(err, provider.ErrAuthRequired) {
 		t.Fatalf("err = %v", err)
 	}

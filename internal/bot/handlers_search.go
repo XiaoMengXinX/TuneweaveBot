@@ -204,7 +204,7 @@ func (a *App) handleCallbackMusic(ctx context.Context, tg *tgb.Bot, update *mode
 		return
 	}
 	a.answerCallback(ctx, query.ID, render.CallbackText)
-	if err := a.processMusic(ctx, ref, msg.ReplyToMessage, nil); err != nil {
+	if err := a.processMusic(ctx, ref, messageTarget(msg.ReplyToMessage, sourceCallback), nil); err != nil {
 		a.log.Errorln(err)
 	}
 }

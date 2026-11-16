@@ -77,6 +77,9 @@ type App struct {
 	cooldownMu    sync.Mutex                    // 保护 cooldowns
 	cooldowns     map[cooldownKey]time.Time     // 冷却截止时间
 	inflight      sync.WaitGroup                // 在途 handler，优雅退出时等待
+	// 下载位的占用与排队数
+	downloadsActive  atomic.Int64
+	downloadsWaiting atomic.Int64
 }
 
 // Run 阻塞运行 bot，返回 true 表示需重载配置

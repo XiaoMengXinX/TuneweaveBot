@@ -140,7 +140,7 @@ func TestProcessMusicCachedInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	err = a.processMusic(context.Background(), provider.Ref{Provider: info.Provider, ID: info.TrackID}, &models.Message{ID: 1, Chat: models.Chat{ID: 42}}, func(got store.SongInfo) {
+	err = a.processMusic(context.Background(), provider.Ref{Provider: info.Provider, ID: info.TrackID}, messageTarget(&models.Message{ID: 1, Chat: models.Chat{ID: 42}}, sourceCommand), func(got store.SongInfo) {
 		called = true
 		if got.SongName != info.SongName || got.SongArtists != info.SongArtists || got.SongAlbum != info.SongAlbum {
 			t.Errorf("unexpected song info: %+v", got)
@@ -194,9 +194,9 @@ func TestProcessMusicInfoWithoutURL(t *testing.T) {
 			}
 			setTestProvider(t, a, p)
 			calls := 0
-			err = a.processMusic(context.Background(), provider.Ref{Provider: "netease", ID: "123"}, &models.Message{
+			err = a.processMusic(context.Background(), provider.Ref{Provider: "netease", ID: "123"}, messageTarget(&models.Message{
 				ID: 1, Chat: models.Chat{ID: 42}, From: &models.User{ID: 42},
-			}, func(info store.SongInfo) {
+			}, sourceCommand), func(info store.SongInfo) {
 				calls++
 				if info.TrackID != "123" || info.SongName != "雨き声残響" || info.SongArtists != "ゆめこ" || info.SongAlbum != "最新热歌慢摇92" {
 					t.Errorf("unexpected song info: %+v", info)

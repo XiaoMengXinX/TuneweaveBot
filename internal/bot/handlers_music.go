@@ -34,7 +34,7 @@ func (a *App) handleStart(ctx context.Context, tg *tgb.Bot, update *models.Updat
 	if !ok {
 		return
 	}
-	if err := a.processMusic(ctx, ref, m, nil); err != nil {
+	if err := a.processMusic(ctx, ref, messageTarget(m, sourceStart), nil); err != nil {
 		a.log.Errorln(err)
 	}
 }
@@ -71,7 +71,7 @@ func (a *App) handleTemplateMusic(name, template string) tgb.HandlerFunc {
 			}
 			return
 		}
-		if err := a.processMusic(ctx, *ref, m, nil); err != nil {
+		if err := a.processMusic(ctx, *ref, messageTarget(m, sourceCommand), nil); err != nil {
 			a.log.Errorln(err)
 		}
 	}
@@ -87,13 +87,13 @@ func (a *App) handleMusicArgs(ctx context.Context, m *models.Message, providerNa
 	}
 	if providerName == "" {
 		if ref, _, ok := a.providers.Match(ctx, args); ok {
-			if err := a.processMusic(ctx, *ref, m, nil); err != nil {
+			if err := a.processMusic(ctx, *ref, messageTarget(m, sourceCommand), nil); err != nil {
 				a.log.Errorln(err)
 			}
 			return
 		}
 	} else if ref, ok := a.providers.MatchProvider(ctx, providerName, args); ok {
-		if err := a.processMusic(ctx, *ref, m, nil); err != nil {
+		if err := a.processMusic(ctx, *ref, messageTarget(m, sourceCommand), nil); err != nil {
 			a.log.Errorln(err)
 		}
 		return
@@ -108,7 +108,7 @@ func (a *App) handleMusicArgs(ctx context.Context, m *models.Message, providerNa
 		}
 		return
 	}
-	if err := a.processMusic(ctx, items[0].Ref, m, nil); err != nil {
+	if err := a.processMusic(ctx, items[0].Ref, messageTarget(m, sourceCommand), nil); err != nil {
 		a.log.Errorln(err)
 	}
 }
@@ -125,7 +125,7 @@ func (a *App) handleDefault(ctx context.Context, tg *tgb.Bot, update *models.Upd
 	if !ok {
 		return
 	}
-	if err := a.processMusic(ctx, *ref, m, nil); err != nil {
+	if err := a.processMusic(ctx, *ref, messageTarget(m, sourceLink), nil); err != nil {
 		a.log.Errorln(err)
 	}
 }
@@ -165,17 +165,86 @@ func (a *App) messageRef(ctx context.Context, m *models.Message) (*provider.Ref,
 	return nil, false
 }
 
+// 点歌来源，写入点歌记录。
+const (
+	sourceCommand  = "command"
+	sourceCallback = "callback"
+	sourceLink     = "link"
+	sourceStart    = "start"
+	sourceGuest    = "guest"
+	sourceWebApp   = "webapp"
+)
+
+// requestOrigin 是一次点歌的发起者，用于缓存归属与点歌记录。
+type requestOrigin struct {
+	userID   int64
+	userName string
+	chatID   int64
+	chatName string
+	source   string
+}
+
+func messageOrigin(m *models.Message, source string) requestOrigin {
+	origin := requestOrigin{chatID: m.Chat.ID, chatName: m.Chat.Title, source: source}
+	if m.Chat.Type == models.ChatTypePrivate {
+		origin.chatName = m.Chat.Username
+	}
+	if m.From != nil {
+		origin.userID = m.From.ID
+		origin.userName = m.From.Username
+	}
+	return origin
+}
+
+// musicTarget 是一次点歌的发起者与投递位置；replyTo 为 0 时不引用消息。
+type musicTarget struct {
+	origin  requestOrigin
+	chatID  int64
+	replyTo int
+}
+
+// messageTarget 把歌曲回复到触发消息所在的聊天。
+func messageTarget(m *models.Message, source string) musicTarget {
+	return musicTarget{origin: messageOrigin(m, source), chatID: m.Chat.ID, replyTo: m.ID}
+}
+
+// recordRequest 写入一条点歌记录；统计数据缺一行不影响点歌，失败只记日志。
+func (a *App) recordRequest(origin requestOrigin, songInfo store.SongInfo) {
+	if err := a.store.RecordRequest(origin.userID, origin.chatID, songInfo.ID, origin.source); err != nil {
+		a.log.Errorln(err)
+	}
+}
+
+// acquireDownload 占用一个下载位，返回的函数用于释放。
+func (a *App) acquireDownload(ctx context.Context) (release func(), err error) {
+	a.downloadsWaiting.Add(1)
+	err = a.musicSem.Acquire(ctx, 1)
+	a.downloadsWaiting.Add(-1)
+	if err != nil {
+		return nil, err
+	}
+	a.downloadsActive.Add(1)
+	return func() {
+		a.downloadsActive.Add(-1)
+		a.musicSem.Release(1)
+	}, nil
+}
+
 // processMusic 以规范歌曲 Ref 为缓存键，ref.Sub 非空时先归一子资源。
-func (a *App) processMusic(ctx context.Context, ref provider.Ref, message *models.Message, onInfo func(store.SongInfo)) error {
-	chatID := message.Chat.ID
-	reply := &models.ReplyParameters{MessageID: message.ID, AllowSendingWithoutReply: true}
+func (a *App) processMusic(ctx context.Context, ref provider.Ref, target musicTarget, onInfo func(store.SongInfo)) error {
+	chatID := target.chatID
+	var reply *models.ReplyParameters
+	if target.replyTo != 0 {
+		reply = &models.ReplyParameters{MessageID: target.replyTo, AllowSendingWithoutReply: true}
+	}
+	say := func(text string) (*models.Message, error) { return a.sendMessage(ctx, chatID, text, target.replyTo) }
 
 	canonical := ref
 	if ref.Sub != "" {
 		resolved, err := a.providers.Canonicalize(ctx, ref)
 		if err != nil {
 			// 归一失败（如节目无主歌曲）须给用户反馈，否则发链接后毫无回应
-			if _, rErr := a.reply(ctx, message, render.FetchInfoFailed); rErr != nil {
+			if _, rErr := say(render.FetchInfoFailed); rErr != nil {
 				a.log.Errorln(rErr)
 			}
 			return err
@@ -194,37 +263,45 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, message *model
 		info, ok := a.store.GetByRef(canonical.Provider, canonical.ID)
 		return info, ok && info.FileID != ""
 	}
+	sendHit := func(songInfo store.SongInfo, statusMsgID int, status func(string) error) error {
+		if err := a.sendCached(ctx, songInfo, displayTrack(), chatID, reply, statusMsgID, status); err != nil {
+			return err
+		}
+		a.recordRequest(target.origin, songInfo)
+		return nil
+	}
 
 	if songInfo, ok := cached(); ok {
 		if onInfo != nil {
 			onInfo(songInfo)
 		}
-		msgResult, err := a.reply(ctx, message, render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.HitCache))
+		msgResult, err := say(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.HitCache))
 		if err != nil {
 			return err
 		}
 		status := func(text string) error { return a.editMessage(ctx, chatID, msgResult.ID, text, nil) }
-		return a.sendCached(ctx, songInfo, displayTrack(), chatID, reply, msgResult.ID, status)
+		return sendHit(songInfo, msgResult.ID, status)
 	}
 
 	// 凭据失效不影响缓存发送
 	if !a.auth.Available(canonical.Provider) {
-		if _, err := a.reply(ctx, message, render.CookieExpired(a.providerDisplay(canonical.Provider))); err != nil {
+		if _, err := say(render.CookieExpired(a.providerDisplay(canonical.Provider))); err != nil {
 			a.log.Errorln(err)
 		}
 		return nil
 	}
 
-	msgResult, err := a.reply(ctx, message, render.WaitForDown)
+	msgResult, err := say(render.WaitForDown)
 	if err != nil {
 		return err
 	}
 	status := func(text string) error { return a.editMessage(ctx, chatID, msgResult.ID, text, nil) }
 
-	if err := a.musicSem.Acquire(ctx, 1); err != nil {
+	release, err := a.acquireDownload(ctx)
+	if err != nil {
 		return err
 	}
-	defer a.musicSem.Release(1)
+	defer release()
 
 	// 等待下载位时缓存可能已被其他任务填充
 	if songInfo, ok := cached(); ok {
@@ -234,12 +311,14 @@ func (a *App) processMusic(ctx context.Context, ref provider.Ref, message *model
 		if err := status(render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.HitCache)); err != nil {
 			return err
 		}
-		return a.sendCached(ctx, songInfo, displayTrack(), chatID, reply, msgResult.ID, status)
+		return sendHit(songInfo, msgResult.ID, status)
 	}
 
-	if _, err := a.fetchMusic(ctx, canonical, ref, nil, message, onInfo, chatID, reply, status); err != nil {
+	songInfo, err := a.fetchMusic(ctx, canonical, ref, nil, target.origin, onInfo, chatID, reply, status)
+	if err != nil {
 		return err
 	}
+	a.recordRequest(target.origin, songInfo)
 	return a.deleteMessage(ctx, chatID, msgResult.ID)
 }
 
@@ -253,7 +332,7 @@ func (a *App) sendCached(ctx context.Context, songInfo store.SongInfo, track *pr
 }
 
 // fetchMusic 下载歌曲上传到 chatID 并写入缓存，失败原因已经由 status 展示
-func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *provider.Track, message *models.Message, onInfo func(store.SongInfo),
+func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *provider.Track, origin requestOrigin, onInfo func(store.SongInfo),
 	chatID int64, reply *models.ReplyParameters, status func(string) error) (store.SongInfo, error) {
 	var songInfo store.SongInfo
 	if err := status(render.FetchInfo); err != nil {
@@ -276,7 +355,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		resolved, err := a.providers.Resolve(resolveCtx, ref)
 		if err != nil {
 			if resolved != nil {
-				a.fillSongInfo(&songInfo, resolved, ref, message)
+				a.fillSongInfo(&songInfo, resolved, ref, origin)
 				if onInfo != nil {
 					onInfo(songInfo)
 				}
@@ -301,7 +380,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		}
 		track = resolved
 	}
-	a.fillSongInfo(&songInfo, track, ref, message)
+	a.fillSongInfo(&songInfo, track, ref, origin)
 	if onInfo != nil {
 		onInfo(songInfo)
 	}
@@ -488,17 +567,11 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 	return songInfo, a.store.Save(&songInfo)
 }
 
-func (a *App) fillSongInfo(songInfo *store.SongInfo, track *provider.Track, ref provider.Ref, message *models.Message) {
-	songInfo.FromChatID = message.Chat.ID
-	if message.Chat.Type == models.ChatTypePrivate {
-		songInfo.FromChatName = message.Chat.Username
-	} else {
-		songInfo.FromChatName = message.Chat.Title
-	}
-	if message.From != nil {
-		songInfo.FromUserID = message.From.ID
-		songInfo.FromUserName = message.From.Username
-	}
+func (a *App) fillSongInfo(songInfo *store.SongInfo, track *provider.Track, ref provider.Ref, origin requestOrigin) {
+	songInfo.FromChatID = origin.chatID
+	songInfo.FromChatName = origin.chatName
+	songInfo.FromUserID = origin.userID
+	songInfo.FromUserName = origin.userName
 	// provider 返回的规范 ID 优先；部分接口缺省 id 时回退到请求的 ref
 	id := track.Ref.ID
 	if id == "" || id == "0" {

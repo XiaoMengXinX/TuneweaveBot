@@ -63,6 +63,7 @@ func (a *App) guestMusic(ctx context.Context, m *models.Message) models.InlineQu
 		}
 	}
 	if songInfo.FileID != "" {
+		a.recordRequest(messageOrigin(m, sourceGuest), songInfo)
 		return a.cachedMusicResult("music", songInfo, nil)
 	}
 
@@ -93,14 +94,15 @@ func (a *App) guestRef(ctx context.Context, m *models.Message) (*provider.Ref, b
 }
 
 func (a *App) cacheMusic(ctx context.Context, ref, display provider.Ref, track *provider.Track, m *models.Message, chatID int64) (store.SongInfo, error) {
-	if err := a.musicSem.Acquire(ctx, 1); err != nil {
+	release, err := a.acquireDownload(ctx)
+	if err != nil {
 		return store.SongInfo{}, err
 	}
-	defer a.musicSem.Release(1)
+	defer release()
 	if songInfo, ok := a.store.GetByRef(ref.Provider, ref.ID); ok && songInfo.FileID != "" {
 		return songInfo, nil
 	}
-	return a.fetchMusic(ctx, ref, display, track, m, nil, chatID, nil, func(string) error { return nil })
+	return a.fetchMusic(ctx, ref, display, track, messageOrigin(m, sourceGuest), nil, chatID, nil, func(string) error { return nil })
 }
 
 func (a *App) guestRecognize(ctx context.Context, voice *models.Voice) models.InlineQueryResult {
