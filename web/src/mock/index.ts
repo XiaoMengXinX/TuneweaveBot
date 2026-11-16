@@ -98,7 +98,7 @@ const QR =
 
 const LOG_MESSAGES: [string, string, string][] = [
   ['INFO', 'netease 登录成功: 小明', 'cookie_watch.go:109'],
-  ['INFO', '看板服务已启动: 127.0.0.1:8080 -> https://bot.example.com/', 'webapp.go:52'],
+  ['INFO', '面板服务已启动: 127.0.0.1:8080 -> https://bot.example.com/', 'webapp.go:52'],
   ['WARNING', 'telegram: Too Many Requests: retry after 3', 'handlers_music.go:38'],
   ['ERROR', '下载失败: Get "https://m801.music.126.net/…/a.flac": context deadline exceeded', 'handlers_music.go:128'],
   ['INFO', '歌曲无可用音源: netease 1901371647, no audio url: 版权方要求，当前歌曲暂无法播放 (code 404, fee 1)', 'handlers_music.go:112'],
@@ -130,7 +130,12 @@ export async function handle(method: string, url: string, body: unknown): Promis
       } satisfies T.Overview
     case 'GET /songs': {
       const list = mine.filter((s) => match(s, search.get('q') ?? ''))
-      if (search.get('order') === 'asc') list.reverse()
+      const order = search.get('order')
+      if (order === 'oldest') list.reverse()
+      if (order === 'az' || order === 'za') {
+        list.sort((a, b) => a.title.localeCompare(b.title, 'en', { sensitivity: 'base' }) || b.last_at - a.last_at)
+        if (order === 'za') list.reverse()
+      }
       return page(list, search)
     }
     case 'GET /search': {
@@ -166,12 +171,27 @@ export async function handle(method: string, url: string, body: unknown): Promis
           { ...PROVIDERS[0], auth: authOK ? 'ok' : 'expired' },
           { ...PROVIDERS[1], auth: 'none' },
         ],
-        downloads: { active: 3, waiting: 2, limit: 4 },
+        memory: { sys: 96.4 * 1024 * 1024, heap: 31.2 * 1024 * 1024 },
         cache_chat: { id: cacheChat, name: cacheChat ? 'Tuneweave Cache' : '' },
         cache_total: songs.length,
+        cache_size: songs.reduce((n, song) => n + song.size, 0),
         db_size: 18.4 * 1024 * 1024,
         cache_dir_size: 312 * 1024 * 1024,
       } satisfies T.Status
+    case 'GET /admin/downloads': {
+      if (params.get('idle') === '1') return { limit: 4, tasks: [] } satisfies T.Downloads
+      // 进度随时间推进，用来预览实时刷新
+      const t = Date.now() / 1000
+      const cycle = (period: number, offset = 0) => ((t + offset) % period) / period
+      const base = { provider: 'netease', track_id: '1', speed: 0, user_name: '', chat_name: '', source: 'link', queued_at: Math.floor(t - 40) }
+      const tasks: T.DownloadTask[] = [
+        { ...base, id: 11, title: '夜に駆ける', artists: 'YOASOBI', album: 'THE BOOK', phase: 'downloading', written: Math.floor(cycle(20) * 38e6), total: 38e6, speed: 2.1e6, user_id: 1, chat_id: -1001000104729, chat_name: '音乐分享群', started_at: Math.floor(t - 18) },
+        { ...base, id: 12, title: '晴天', artists: '周杰伦', album: '叶惠美', phase: 'uploading', written: Math.floor(cycle(12, 5) * 29e6), total: 29e6, speed: 4.6e6, user_id: 2, chat_id: 42, user_name: 'alice', source: 'command', started_at: Math.floor(t - 52) },
+        { ...base, id: 13, title: '', artists: '', album: '', phase: 'resolving', written: 0, total: 0, user_id: 3, chat_id: 7, source: 'webapp', started_at: Math.floor(t - 3) },
+        { ...base, id: 14, title: '', artists: '', album: '', phase: 'waiting', written: 0, total: 0, user_id: 4, chat_id: -1002000000001, chat_name: '深夜电台', source: 'guest', started_at: 0, queued_at: Math.floor(t - 6) },
+      ]
+      return { limit: 4, tasks } satisfies T.Downloads
+    }
     case 'GET /admin/stats': {
       const n = Number(search.get('days'))
       const scale = search.get('provider') ? 0.6 : 1
@@ -315,18 +335,29 @@ export async function handle(method: string, url: string, body: unknown): Promis
       return {}
     case 'GET /admin/logs': {
       const level = (search.get('level') ?? '').toUpperCase()
-      const entries: T.LogEntry[] = Array.from({ length: 60 }, (_, i) => {
-        const [lvl, message, caller] = LOG_MESSAGES[(i * 5 + 3) % LOG_MESSAGES.length]
-        const at = new Date(Date.now() - i * 137_000)
-        const pad = (v: number) => String(v).padStart(2, '0')
+      const pad = (v: number) => String(v).padStart(2, '0')
+      const dayOf = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      const today = dayOf(new Date())
+      // 跨月且中间有几天没有日志
+      const dates = Array.from({ length: 24 }, (_, i) => i)
+        .filter((i) => i % 7 !== 5)
+        .map((i) => dayOf(new Date(Date.now() - i * 86400_000)))
+      const date = search.get('date') ?? today
+      // 当天的日志随时间增长，用来预览实时刷新
+      const count = date === today ? Math.floor(Date.now() / 2000) : 25
+      const entries: T.LogEntry[] = Array.from({ length: Math.min(count, 60) }, (_, i) => {
+        const n = count - i
+        const [lvl, message, caller] = LOG_MESSAGES[(n * 5 + 3) % LOG_MESSAGES.length]
+        // 每条日志的时间固定：第 n 条产生于第 n 个 2 秒
+        const at = new Date(n * 2000)
         return {
-          time: `${at.getFullYear()}/${pad(at.getMonth() + 1)}/${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`,
+          time: `${date.replaceAll('-', '/')} ${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`,
           level: lvl,
           message,
           caller,
         }
       })
-      return { entries: entries.filter((e) => !level || e.level === level) }
+      return { date, today, dates, entries: entries.filter((e) => !level || e.level === level) } satisfies T.Logs
     }
   }
 

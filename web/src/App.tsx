@@ -17,12 +17,13 @@ import { Stats } from './pages/admin/Stats'
 import { Overview } from './pages/Overview'
 import { Search } from './pages/Search'
 import { Songs } from './pages/Songs'
+import { t } from './lib/i18n'
 
 const TAB_ITEMS: { tab: Tab; label: string; icon: IconName; admin?: boolean }[] = [
-  { tab: '/', label: '概览', icon: 'home' },
-  { tab: '/songs', label: '歌曲', icon: 'music' },
-  { tab: '/search', label: '搜索', icon: 'search' },
-  { tab: '/admin', label: '管理', icon: 'sliders', admin: true },
+  { tab: '/', label: t.tabs.overview, icon: 'home' },
+  { tab: '/songs', label: t.tabs.songs, icon: 'music' },
+  { tab: '/search', label: t.tabs.search, icon: 'search' },
+  { tab: '/admin', label: t.tabs.admin, icon: 'sliders', admin: true },
 ]
 
 function Shell() {
@@ -92,7 +93,7 @@ export function App() {
   if (me.isError) {
     return (
       <div className="app">
-        <Empty icon="alert" title="无法打开看板">
+        <Empty icon="alert" title={t.common.cannotOpen}>
           {me.error.message}
         </Empty>
       </div>
@@ -120,7 +121,7 @@ export function App() {
       )}
       {fallback.back && (
         <button className="fallback-back" onClick={fallback.back}>
-          返回
+          {t.common.back}
         </button>
       )}
 
@@ -147,7 +148,7 @@ export function App() {
       {reloading && (
         <div className="overlay" role="status">
           <span className="spinner" />
-          正在重载，等待当前任务完成
+          {t.common.reloading}
         </div>
       )}
     </div>

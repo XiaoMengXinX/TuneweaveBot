@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } 
 import type { DayCount } from '../lib/api'
 import { formatDay, formatDayShort, formatNumber } from '../lib/format'
 import { haptic } from '../lib/telegram'
+import { t } from '../lib/i18n'
 
 const HEIGHT = 132
 const PAD = { top: 8, right: 4, bottom: 22, left: 4 }
@@ -67,7 +68,7 @@ export function TrendChart({ title, data }: { title: string; data: DayCount[] })
             </>
           ) : (
             <>
-              日均
+              {t.chart.dailyAverage}
               <b>{formatNumber(Math.round((total / data.length) * 10) / 10)}</b>
             </>
           )}
@@ -83,7 +84,7 @@ export function TrendChart({ title, data }: { title: string; data: DayCount[] })
         onPointerUp={(e) => e.pointerType !== 'mouse' && setActive(null)}
       >
         {width > 0 && (
-          <svg width={width} height={HEIGHT} role="img" aria-label={`${title}，共${total}，${data.length}天`}>
+          <svg width={width} height={HEIGHT} role="img" aria-label={t.chart.label(title, total, data.length)}>
             {[0, 0.5, 1].map((f) => (
               <line key={f} className="grid" x1={PAD.left} x2={width - PAD.right} y1={y(top * f)} y2={y(top * f)} />
             ))}
@@ -123,7 +124,7 @@ export interface BarItem {
 }
 
 /** 横向条形图：数值直接标在行尾，条长按最大值归一 */
-export function BarList({ items, empty = '暂无数据' }: { items: BarItem[]; empty?: string }) {
+export function BarList({ items, empty = t.common.noData }: { items: BarItem[]; empty?: string }) {
   if (items.length === 0) {
     return (
       <div className="card pad" style={{ color: 'var(--text-2)', fontSize: 'var(--fs-small)' }}>

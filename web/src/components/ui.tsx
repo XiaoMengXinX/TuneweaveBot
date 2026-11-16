@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { haptic } from '../lib/telegram'
 import { Icon, type IconName } from './Icon'
+import { t } from '../lib/i18n'
 
 export function Skeleton({ width, height = 16 }: { width: number | string; height?: number }) {
   return <span className="skeleton" style={{ width, height }} />
@@ -49,10 +50,10 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => 
   return (
     <Empty
       icon="alert"
-      title="加载失败"
+      title={t.common.loadFailed}
       action={
         <button className="btn small" onClick={onRetry}>
-          重试
+          {t.common.retry}
         </button>
       }
     >
@@ -152,7 +153,7 @@ export function SearchField({
         onChange={(e) => onChange(e.target.value)}
       />
       {value && (
-        <button type="button" className="field-clear" aria-label="清空" onClick={() => onChange('')}>
+        <button type="button" className="field-clear" aria-label={t.common.clear} onClick={() => onChange('')}>
           <Icon name="close" size={16} />
         </button>
       )}
@@ -197,17 +198,17 @@ export function AuthBadge({ auth }: { auth: 'ok' | 'expired' | 'none' }) {
     return (
       <span className="badge ok">
         <i className="dot" />
-        已登录
+        {t.common.loggedIn}
       </span>
     )
   if (auth === 'expired')
     return (
       <span className="badge danger">
         <i className="dot" />
-        已失效
+        {t.common.expired}
       </span>
     )
-  return <span className="badge">无需登录</span>
+  return <span className="badge">{t.common.noLogin}</span>
 }
 
 export function NavCell({

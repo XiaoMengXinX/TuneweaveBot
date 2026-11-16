@@ -365,6 +365,63 @@ dl {
   transition: width var(--t-base) var(--ease);
 }
 
+/* ---- 下载任务 ---- */
+
+.task {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.task + .task::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 0;
+  border-top: var(--hairline) solid var(--border);
+}
+
+.task-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.task-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+
+.task .meter {
+  margin-top: 4px;
+}
+
+.task-empty {
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+
+/* 卡片底边的下载位占用条 */
+.meter.task-load {
+  margin: 0;
+  height: 3px;
+  border-radius: 0;
+  background: none;
+}
+
+.meter.task-load > i {
+  border-radius: 0 2px 2px 0;
+}
+
 /* ---- 徽标 ---- */
 
 .badge {
@@ -480,12 +537,18 @@ dl {
   background: var(--fill-pressed);
 }
 
-.icon-btn svg {
-  transition: transform var(--t-base) var(--ease);
+.icon-btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
-.icon-btn.flipped svg {
-  transform: scaleY(-1);
+.icon-btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.icon-btn svg {
+  transition: transform var(--t-base) var(--ease);
 }
 
 .textarea {
@@ -1106,6 +1169,168 @@ dl {
   overflow-wrap: anywhere;
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* 日期切换：左右步进，中间显示当前日期 */
+.stepper {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  border-radius: var(--radius-control);
+  background: var(--fill);
+}
+
+.stepper button {
+  width: 44px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  transition: opacity var(--t-fast) ease-out;
+}
+
+.stepper button:first-child svg {
+  transform: scaleX(-1);
+}
+
+.stepper button:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.stepper .stepper-label {
+  flex: 1;
+  width: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.stepper .stepper-label svg {
+  transform: none;
+  color: var(--text-2);
+}
+
+.stepper .stepper-label[aria-expanded='true'] svg {
+  color: var(--accent-text);
+}
+
+.stepper-label small {
+  font-size: var(--fs-caption);
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+/* 日历：只有带日志的日期可选 */
+.calendar {
+  padding: 10px 12px 12px;
+  animation: calendar-in var(--t-base) var(--ease);
+}
+
+@keyframes calendar-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.calendar-head span {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-head button {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text-2);
+}
+
+.calendar-head button:first-child svg {
+  transform: scaleX(-1);
+}
+
+.calendar-head button:active {
+  background: var(--fill);
+}
+
+.calendar-head button:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  justify-items: center;
+  row-gap: 2px;
+}
+
+.calendar-grid .weekday {
+  height: 28px;
+  line-height: 28px;
+  font-size: var(--fs-caption);
+  color: var(--text-3);
+}
+
+.calendar-grid button {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  text-align: center;
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--t-fast) ease-out;
+}
+
+.calendar-grid button:active {
+  background: var(--fill);
+}
+
+.calendar-grid button:disabled {
+  color: var(--text-3);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.calendar-grid button.today {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.calendar-grid button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok-solid);
+  animation: live-pulse 1.6s ease-out infinite;
+}
+
+@keyframes live-pulse {
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .log {

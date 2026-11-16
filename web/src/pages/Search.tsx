@@ -5,6 +5,7 @@ import { CellSkeleton, Chips, Empty, ErrorState, SearchField } from '../componen
 import { get, query, type Me, type SearchPage } from '../lib/api'
 import { formatTrack } from '../lib/format'
 import { refKey, useSendSong } from '../lib/hooks'
+import { t } from '../lib/i18n'
 
 export function Search({ me, hidden }: { me: Me; hidden: boolean }) {
   const [input, setInput] = useState('')
@@ -42,7 +43,7 @@ export function Search({ me, hidden }: { me: Me; hidden: boolean }) {
 
   return (
     <div className="page tab-in" hidden={hidden}>
-      <h1 className="large-title">搜索点歌</h1>
+      <h1 className="large-title">{t.search.title}</h1>
       <div className="sticky-bar">
         <SearchField
           value={input}
@@ -51,7 +52,7 @@ export function Search({ me, hidden }: { me: Me; hidden: boolean }) {
             if (value === '') setKeyword('')
           }}
           onSubmit={() => setKeyword(input.trim())}
-          placeholder="歌名、歌手"
+          placeholder={t.search.placeholder}
         />
         {me.providers.length > 1 && (
           <Chips
@@ -63,16 +64,16 @@ export function Search({ me, hidden }: { me: Me; hidden: boolean }) {
       </div>
 
       {keyword === '' ? (
-        <Empty icon="search" title="搜索想听的歌">
-          点击结果，bot会下载并发到你的私聊
+        <Empty icon="search" title={t.search.idle}>
+          {t.search.idleHint}
         </Empty>
       ) : results.isPending ? (
         <CellSkeleton rows={8} />
       ) : results.isError ? (
         <ErrorState error={results.error} onRetry={results.refetch} />
       ) : items.length === 0 ? (
-        <Empty icon="search" title="未找到结果">
-          换个关键词或平台试试
+        <Empty icon="search" title={t.search.none}>
+          {t.search.noneHint}
         </Empty>
       ) : (
         <>
@@ -86,7 +87,7 @@ export function Search({ me, hidden }: { me: Me; hidden: boolean }) {
                 onClick={() => send({ provider: item.provider, id: item.id, sub: item.sub })}
                 side={
                   <>
-                    {item.cached && <span className="badge accent">已缓存</span>}
+                    {item.cached && <span className="badge accent">{t.search.cached}</span>}
                     {item.duration > 0 && <span className="num">{formatTrack(item.duration)}</span>}
                   </>
                 }

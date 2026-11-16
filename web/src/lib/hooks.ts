@@ -3,6 +3,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { toast } from '../components/Toast'
 import { get, post } from './api'
 import { haptic } from './telegram'
+import { t } from './i18n'
 
 export function useDebounced<T>(value: T, ms = 250): T {
   const [debounced, setDebounced] = useState(value)
@@ -27,7 +28,7 @@ export function useSendSong() {
   const mutation = useMutation({
     mutationFn: (ref: SongRef) => post('/music', ref),
     onSuccess: () => {
-      toast.ok('已交给bot，请到私聊查看')
+      toast.ok(t.send.done)
       // 点歌记录稍后才写入，延迟刷新概览与列表
       setTimeout(() => {
         client.invalidateQueries({ queryKey: ['overview'] })
@@ -88,10 +89,10 @@ export function useAwaitReload() {
     }
     setReloading(false)
     if (Date.now() >= deadline) {
-      toast.error('等待重载超时，请稍后重新打开看板')
+      toast.error(t.common.reloadTimeout)
       return
     }
     await client.invalidateQueries()
-    toast.ok('重载完成')
+    toast.ok(t.common.reloadDone)
   }
 }

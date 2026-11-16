@@ -9,6 +9,7 @@ import { formatBytes, formatDateTime, formatNumber, formatRelative, formatTrack 
 import { useDebounced, useSendSong } from '../../lib/hooks'
 import { back, push } from '../../lib/router'
 import { confirmDialog, haptic, openLink } from '../../lib/telegram'
+import { t } from '../../lib/i18n'
 
 export function Cache({ me, hidden }: { me: Me; hidden: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -31,14 +32,14 @@ export function Cache({ me, hidden }: { me: Me; hidden: boolean }) {
 
   return (
     <div className="page sub" hidden={hidden} ref={scrollRef}>
-      <h1 className="large-title">缓存管理</h1>
+      <h1 className="large-title">{t.cache.title}</h1>
       <div className="sticky-bar">
-        <SearchField value={keyword} onChange={setKeyword} placeholder="搜索歌名、歌手、专辑或歌曲ID" />
+        <SearchField value={keyword} onChange={setKeyword} placeholder={t.cache.placeholder} />
         {me.providers.length > 1 && (
           <Chips
             value={provider}
             onChange={setProvider}
-            options={[{ value: '', label: '全部平台' }, ...me.providers.map((p) => ({ value: p.name, label: p.display }))]}
+            options={[{ value: '', label: t.common.allPlatforms }, ...me.providers.map((p) => ({ value: p.name, label: p.display }))]}
           />
         )}
       </div>
@@ -48,10 +49,10 @@ export function Cache({ me, hidden }: { me: Me; hidden: boolean }) {
       ) : songs.isError ? (
         <ErrorState error={songs.error} onRetry={songs.refetch} />
       ) : total === 0 ? (
-        <Empty icon="database" title={q || provider ? '没有匹配的缓存' : '还没有缓存'} />
+        <Empty icon="database" title={q || provider ? t.cache.noMatch : t.cache.empty} />
       ) : (
         <>
-          <p className="list-count">共{formatNumber(total)}首，最新缓存的在前</p>
+          <p className="list-count">{t.cache.count(formatNumber(total))}</p>
           <VirtualSongList
             query={songs}
             scrollRef={scrollRef}
@@ -88,7 +89,7 @@ export function CacheDetail({ id }: { id: string }) {
   const remove = useMutation({
     mutationFn: () => del(`/admin/cache/${id}`),
     onSuccess: () => {
-      toast.ok('缓存已删除')
+      toast.ok(t.cache.deleted)
       client.invalidateQueries({ queryKey: ['admin', 'cache', 'list'] })
       client.invalidateQueries({ queryKey: ['admin', 'status'] })
       back()
@@ -105,11 +106,11 @@ export function CacheDetail({ id }: { id: string }) {
     )
   }
 
-  const who = (name: string, id: number) => (name ? `${name} (${id})` : id ? String(id) : '未知')
+  const who = (name: string, id: number) => (name ? `${name} (${id})` : id ? String(id) : t.common.unknown)
 
   return (
     <div className="page sub">
-      <h1 className="large-title">缓存详情</h1>
+      <h1 className="large-title">{t.cache.detail}</h1>
       <div className="stack">
         <div className="card song-hero">
           {d ? (
@@ -139,27 +140,27 @@ export function CacheDetail({ id }: { id: string }) {
           <>
             <dl className="card">
               <div className="kv">
-                <dt>歌曲ID</dt>
+                <dt>{t.cache.trackId}</dt>
                 <dd className="mono selectable">{d.song.track_id}</dd>
               </div>
               <div className="kv">
-                <dt>被点次数</dt>
+                <dt>{t.cache.requests}</dt>
                 <dd className="num">{formatNumber(d.requests)}</dd>
               </div>
               <div className="kv">
-                <dt>首次缓存</dt>
+                <dt>{t.cache.firstCached}</dt>
                 <dd className="num">{formatDateTime(d.song.cached_at)}</dd>
               </div>
               <div className="kv">
-                <dt>最近更新</dt>
+                <dt>{t.cache.updated}</dt>
                 <dd className="num">{formatDateTime(d.updated_at)}</dd>
               </div>
               <div className="kv">
-                <dt>缓存者</dt>
+                <dt>{t.cache.cachedBy}</dt>
                 <dd className="selectable">{who(d.from_user_name, d.from_user_id)}</dd>
               </div>
               <div className="kv">
-                <dt>来自聊天</dt>
+                <dt>{t.cache.fromChat}</dt>
                 <dd className="selectable">{who(d.from_chat_name, d.from_chat_id)}</dd>
               </div>
             </dl>
@@ -171,12 +172,12 @@ export function CacheDetail({ id }: { id: string }) {
                 onClick={() => send({ provider: d.song.provider, id: d.song.track_id })}
               >
                 <Icon name="send" size={18} />
-                发到私聊
+                {t.cache.sendToMe}
               </button>
               {d.page_url && (
                 <button className="btn" onClick={() => openLink(d.page_url)}>
                   <Icon name="external" size={18} />
-                  歌曲页面
+                  {t.cache.songPage}
                 </button>
               )}
             </div>
@@ -185,11 +186,11 @@ export function CacheDetail({ id }: { id: string }) {
               disabled={remove.isPending}
               onClick={async () => {
                 haptic.tap()
-                if (await confirmDialog(`删除「${d.song.title}」的缓存？下次点歌时会重新下载。`)) remove.mutate()
+                if (await confirmDialog(t.cache.confirmDelete(d.song.title))) remove.mutate()
               }}
             >
               {remove.isPending ? <span className="spinner" /> : <Icon name="trash" size={18} />}
-              删除缓存
+              {t.cache.delete}
             </button>
           </>
         )}

@@ -1,26 +1,27 @@
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
-import { Icon } from '../components/Icon'
 import { PAGE_SIZE, SongCell, songSubtitle, VirtualSongList } from '../components/SongList'
-import { CellSkeleton, Empty, ErrorState, SearchField } from '../components/ui'
-import { get, query, type Page, type UserSong } from '../lib/api'
+import { CellSkeleton, Empty, ErrorState, SearchField, Segmented } from '../components/ui'
+import { get, query, type Page, type SongOrder, type UserSong } from '../lib/api'
 import { formatNumber, formatRelative } from '../lib/format'
 import { refKey, useDebounced, useSendSong } from '../lib/hooks'
 import { switchTab } from '../lib/router'
-import { haptic } from '../lib/telegram'
+import { t } from '../lib/i18n'
+
+const ORDERS: SongOrder[] = ['recent', 'oldest', 'az', 'za']
 
 export function Songs({ hidden }: { hidden: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [keyword, setKeyword] = useState('')
-  const [oldestFirst, setOldestFirst] = useState(false)
+  const [order, setOrder] = useState<SongOrder>('recent')
   const q = useDebounced(keyword.trim())
   const { send, sending } = useSendSong()
 
   const songs = useInfiniteQuery({
-    queryKey: ['songs', 'list', q, oldestFirst],
+    queryKey: ['songs', 'list', q, order],
     queryFn: ({ pageParam }) =>
       get<Page<UserSong>>(
-        '/songs' + query({ q, order: oldestFirst ? 'asc' : 'desc', limit: PAGE_SIZE, offset: pageParam }),
+        '/songs' + query({ q, order, limit: PAGE_SIZE, offset: pageParam }),
       ),
     initialPageParam: 0,
     getNextPageParam: (last, pages) => {
@@ -33,22 +34,17 @@ export function Songs({ hidden }: { hidden: boolean }) {
 
   return (
     <div className="page tab-in" hidden={hidden} ref={scrollRef}>
-      <h1 className="large-title">我的歌曲</h1>
+      <h1 className="large-title">{t.songs.title}</h1>
       <div className="sticky-bar">
-        <div className="row">
-          <SearchField value={keyword} onChange={setKeyword} placeholder="搜索歌名、歌手或专辑" />
-          <button
-            className={`icon-btn ${oldestFirst ? 'flipped' : ''}`}
-            aria-label={oldestFirst ? '当前最早优先，切换为最近优先' : '当前最近优先，切换为最早优先'}
-            onClick={() => {
-              haptic.select()
-              setOldestFirst(!oldestFirst)
-              scrollRef.current?.scrollTo({ top: 0 })
-            }}
-          >
-            <Icon name="sort" size={20} />
-          </button>
-        </div>
+        <SearchField value={keyword} onChange={setKeyword} placeholder={t.songs.placeholder} />
+        <Segmented
+          value={order}
+          onChange={(next) => {
+            setOrder(next)
+            scrollRef.current?.scrollTo({ top: 0 })
+          }}
+          options={ORDERS.map((value) => ({ value, label: t.songs.orders[value] }))}
+        />
       </div>
 
       {songs.isPending ? (
@@ -57,26 +53,27 @@ export function Songs({ hidden }: { hidden: boolean }) {
         <ErrorState error={songs.error} onRetry={songs.refetch} />
       ) : total === 0 ? (
         q ? (
-          <Empty icon="search" title="没有匹配的歌曲">
-            换个关键词试试
+          <Empty icon="search" title={t.songs.noMatch}>
+            {t.songs.tryAnother}
           </Empty>
         ) : (
           <Empty
             icon="music"
-            title="还没有点歌记录"
+            title={t.common.noHistory}
             action={
               <button className="btn small" onClick={() => switchTab('/search')}>
-                去搜索
+                {t.common.goSearch}
               </button>
             }
           >
-            点过的歌会出现在这里
+            {t.songs.emptyHint}
           </Empty>
         )
       ) : (
         <>
           <p className="list-count">
-            共{formatNumber(total)}首，{oldestFirst ? '最早点的在前' : '最近点的在前'}
+            {/* 数量与排序说明之间用中点分隔 */}
+            {t.songs.count(formatNumber(total))} · {t.songs.orderNotes[order]}
           </p>
           <VirtualSongList
             query={songs}

@@ -7,6 +7,7 @@ import { get, post, type PluginUpdate, type Plugins as PluginsData, type UpdateC
 import { useAwaitReload } from '../../lib/hooks'
 import { push } from '../../lib/router'
 import { confirmDialog, haptic, useMainButton } from '../../lib/telegram'
+import { t } from '../../lib/i18n'
 
 const usePlugins = () => useQuery({ queryKey: ['admin', 'plugins'], queryFn: () => get<PluginsData>('/admin/plugins') })
 
@@ -31,18 +32,18 @@ export function Plugins() {
   const updates = check.data?.updates ?? []
   const { mutate } = apply
   const onApply = useCallback(async () => {
-    if (await confirmDialog(`更新${updates.length}个插件？更新后bot会在当前任务完成后重载。`)) {
+    if (await confirmDialog(t.plugins.confirmUpdate(updates.length))) {
       mutate(updates.map((u) => u.name))
     }
   }, [mutate, updates])
   useMainButton(
-    updates.length > 0 ? { text: `更新${updates.length}个插件并重载`, onClick: onApply, loading: apply.isPending } : null,
+    updates.length > 0 ? { text: t.plugins.updateButton(updates.length), onClick: onApply, loading: apply.isPending } : null,
   )
 
   if (plugins.isPending) {
     return (
       <div className="page sub">
-        <h1 className="large-title">插件</h1>
+        <h1 className="large-title">{t.plugins.title}</h1>
         <CellSkeleton rows={3} />
       </div>
     )
@@ -59,13 +60,13 @@ export function Plugins() {
 
   return (
     <div className="page sub">
-      <h1 className="large-title">插件</h1>
+      <h1 className="large-title">{t.plugins.title}</h1>
       <div className="stack">
         {data.rollbacks.map((rb) => (
           <div className="notice" key={rb.name}>
             <Icon name="alert" size={18} />
             <span className="selectable">
-              {rb.display_name}的新版本加载失败，已回滚到{rb.version}。
+              {t.plugins.rolledBack(rb.display_name, rb.version)}
               <br />
               {rb.error}
             </span>
@@ -83,7 +84,7 @@ export function Plugins() {
                 </span>
               </span>
               <span className="cell-side inline">
-                {p.default && <span className="badge accent">默认</span>}
+                {p.default && <span className="badge accent">{t.common.default}</span>}
                 {p.auth === 'expired' && <AuthBadge auth="expired" />}
                 <span className="chevron">
                   <Icon name="chevron" size={18} />
@@ -94,24 +95,24 @@ export function Plugins() {
         </div>
       </div>
 
-      <h2 className="section-title">更新</h2>
+      <h2 className="section-title">{t.plugins.updates}</h2>
       <div className="stack">
         {check.data &&
           (check.data.checked === 0 ? (
             <div className="notice">
               <Icon name="alert" size={18} />
-              <span>没有可自动更新的插件。</span>
+              <span>{t.plugins.noneUpdatable}</span>
             </div>
           ) : updates.length === 0 && !check.data.error ? (
             <div className="notice ok">
               <Icon name="check" size={18} />
-              <span>所有插件都是最新版本。</span>
+              <span>{t.plugins.upToDate}</span>
             </div>
           ) : null)}
         {check.data?.error && (
           <div className="notice danger">
             <Icon name="alert" size={18} />
-            <span className="selectable">检查更新时出错：{check.data.error}</span>
+            <span className="selectable">{t.plugins.checkError(check.data.error)}</span>
           </div>
         )}
         {updates.length > 0 && (
@@ -132,7 +133,7 @@ export function Plugins() {
               <div className="kv" key={r.name}>
                 <dt>{r.display_name}</dt>
                 <dd className="num" style={r.error ? { color: 'var(--danger-text)' } : undefined}>
-                  {r.error ?? `已更新到${r.to}`}
+                  {r.error ?? t.plugins.updatedTo(r.to)}
                 </dd>
               </div>
             ))}
@@ -140,12 +141,12 @@ export function Plugins() {
         )}
         <button className="btn" disabled={!checkable || check.isPending || apply.isPending} onClick={() => check.mutate()}>
           {check.isPending ? <span className="spinner" /> : <Icon name="refresh" size={18} />}
-          检查更新
+          {t.plugins.check}
         </button>
         <p className="section-note" style={{ marginTop: 0 }}>
           {checkable
-            ? '更新前会校验sha256并备份旧文件。新版本加载失败时自动回滚，并在这里提示。'
-            : '已加载的插件没有声明更新地址（本地构建的插件不参与自动更新）。'}
+            ? t.plugins.checkNote
+            : t.plugins.noUpdateUrl}
         </p>
       </div>
     </div>
@@ -166,33 +167,33 @@ export function PluginDetail({ name }: { name: string }) {
       {p && (
         <dl className="card">
           <div className="kv">
-            <dt>名称</dt>
+            <dt>{t.plugins.name}</dt>
             <dd className="mono selectable">{p.name}</dd>
           </div>
           <div className="kv">
-            <dt>版本</dt>
+            <dt>{t.plugins.version}</dt>
             <dd className="num selectable">{p.version}</dd>
           </div>
           {p.build && (
             <div className="kv">
-              <dt>构建</dt>
+              <dt>{t.plugins.build}</dt>
               <dd className="num selectable">{p.build}</dd>
             </div>
           )}
           <div className="kv">
-            <dt>能力</dt>
-            <dd>{p.capabilities.join('、') || '无'}</dd>
+            <dt>{t.plugins.capabilities}</dt>
+            <dd>{t.common.list(p.capabilities) || t.plugins.none}</dd>
           </div>
           <div className="kv">
-            <dt>常驻实例</dt>
+            <dt>{t.plugins.instances}</dt>
             <dd className="num">{p.instances}</dd>
           </div>
           <div className="kv">
-            <dt>自动更新</dt>
-            <dd>{p.updatable ? '支持' : '未声明更新地址'}</dd>
+            <dt>{t.plugins.autoUpdate}</dt>
+            <dd>{p.updatable ? t.plugins.supported : t.plugins.noUpdateDeclared}</dd>
           </div>
           <div className="kv">
-            <dt>文件</dt>
+            <dt>{t.plugins.file}</dt>
             <dd className="mono selectable">{p.path}</dd>
           </div>
         </dl>

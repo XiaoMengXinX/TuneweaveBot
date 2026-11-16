@@ -24,7 +24,6 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   chevron: <path d="m9 6 6 6-6 6" />,
-  sort: <path d="M7 5v14m0 0-3-3m3 3 3-3M14 7h6M14 12h4.5M14 17h3" />,
   close: <path d="m7 7 10 10M17 7 7 17" />,
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   alert: (
@@ -59,6 +58,14 @@ const paths: Record<string, ReactNode> = {
     <>
       <rect x="3.5" y="5" width="17" height="14" rx="2" />
       <path d="m7.5 10 2.5 2-2.5 2M12.5 14.5h4" />
+    </>
+  ),
+  play: <path d="M8 5.5v13l10.5-6.5z" />,
+  stop: <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />,
+  calendar: (
+    <>
+      <rect x="4" y="5.5" width="16" height="14.5" rx="2" />
+      <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" />
     </>
   ),
   refresh: <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v3.5H16" />,

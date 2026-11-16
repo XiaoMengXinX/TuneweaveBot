@@ -6,6 +6,7 @@ import { Empty } from './components/ui'
 import { ApiError } from './lib/api'
 import { initTelegram } from './lib/telegram'
 import './styles/app.css'
+import { t } from './lib/i18n'
 
 initTelegram()
 
@@ -32,7 +33,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     if (!this.state.error) return this.props.children
     return (
       <div className="app">
-        <Empty icon="alert" title="页面出错了">
+        <Empty icon="alert" title={t.common.pageError}>
           {this.state.error.message}
         </Empty>
       </div>

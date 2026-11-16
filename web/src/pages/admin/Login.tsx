@@ -5,14 +5,8 @@ import { toast } from '../../components/Toast'
 import { CellSkeleton, ErrorState } from '../../components/ui'
 import { del, get, post, type LoginSession, type LoginState } from '../../lib/api'
 import { haptic, openLink, useMainButton } from '../../lib/telegram'
+import { t } from '../../lib/i18n'
 
-const RESULT: Record<string, string> = {
-  failed: '登录失败，请稍后重试',
-  expired: '登录已过期，请重新发起',
-  cancelled: '已取消登录',
-  reloading: 'bot正在重载，登录已中断，请稍后重试',
-  check_failed: '查询登录状态失败，请稍后重试',
-}
 
 const active = (s: LoginSession | null | undefined) => !!s && (s.state === 'waiting' || s.state === 'scanned')
 
@@ -63,7 +57,7 @@ export function Login() {
 
   return (
     <div className="page sub">
-      <h1 className="large-title">登录</h1>
+      <h1 className="large-title">{t.login.title}</h1>
       {login.isPending ? (
         <CellSkeleton rows={2} />
       ) : login.isError && !data ? (
@@ -79,12 +73,12 @@ export function Login() {
           {data!.busy && (
             <div className="notice">
               <Icon name="alert" size={18} />
-              <span>已有通过 /login 命令发起的登录会话，结束后才能在这里登录。</span>
+              <span>{t.login.busy}</span>
             </div>
           )}
           {data!.providers.length === 0 && (
             <div className="card pad" style={{ color: 'var(--text-2)', fontSize: 'var(--fs-small)' }}>
-              已加载的插件都不需要登录。
+              {t.login.noneNeeded}
             </div>
           )}
           {data!.providers.map((p) => {
@@ -94,11 +88,11 @@ export function Login() {
                 <div className="cell">
                   <div className="cell-main">
                     <div className="cell-title">{p.display}</div>
-                    <div className="cell-sub">{p.available ? '凭据有效' : '凭据已失效，新歌下载已暂停'}</div>
+                    <div className="cell-sub">{p.available ? t.login.valid : t.login.invalid}</div>
                   </div>
                   <span className={`badge ${p.available ? 'ok' : 'danger'}`}>
                     <i className="dot" />
-                    {p.available ? '已登录' : '已失效'}
+                    {p.available ? t.common.loggedIn : t.common.expired}
                   </span>
                 </div>
                 <div className="btn-row" style={{ padding: '4px 14px 14px' }}>
@@ -108,7 +102,7 @@ export function Login() {
                     onClick={() => begin.mutate({ provider: p.name, mode: '' })}
                   >
                     {pending && begin.variables.mode === '' && <span className="spinner" />}
-                    登录
+                    {t.login.start}
                   </button>
                   <button
                     className="btn"
@@ -116,14 +110,14 @@ export function Login() {
                     onClick={() => begin.mutate({ provider: p.name, mode: 'token' })}
                   >
                     {pending && begin.variables.mode === 'token' && <span className="spinner" />}
-                    用token登录
+                    {t.login.withToken}
                   </button>
                 </div>
               </div>
             )
           })}
           <p className="section-note">
-            登录方式由插件决定：扫码、打开链接或提交token。登录成功后凭据会写回配置文件，被暂停的下载自动恢复。
+            {t.login.note}
           </p>
         </div>
       )}
@@ -141,7 +135,7 @@ function SessionPanel({ session, display, onDone }: { session: LoginSession; dis
   })
   const cancelButton = (
     <button className="btn danger" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
-      取消登录
+      {t.login.cancel}
     </button>
   )
 
@@ -152,12 +146,12 @@ function SessionPanel({ session, display, onDone }: { session: LoginSession; dis
         <div className={`notice ${ok ? 'ok' : 'danger'}`}>
           <Icon name={ok ? 'check' : 'alert'} size={18} />
           <span>
-            {ok ? `${display}登录成功${session.nickname ? `：${session.nickname}` : ''}` : RESULT[session.state]}
+            {ok ? t.login.success(display, session.nickname) : t.login.results[session.state]}
             {session.note && <span style={{ whiteSpace: 'pre-line' }}>{session.note}</span>}
           </span>
         </div>
         <button className="btn" onClick={onDone}>
-          完成
+          {t.login.done}
         </button>
       </div>
     )
@@ -170,22 +164,22 @@ function SessionPanel({ session, display, onDone }: { session: LoginSession; dis
     <div className="stack">
       <div className="card qr-box">
         {session.type === 'qr' ? (
-          <img src={session.qr} alt={`${display}登录二维码`} className={scanned ? 'dim' : ''} />
+          <img src={session.qr} alt={t.login.qrAlt(display)} className={scanned ? 'dim' : ''} />
         ) : (
           <button className="btn primary" onClick={() => openLink(session.content)}>
             <Icon name="external" size={18} />
-            打开登录链接
+            {t.login.openLink}
           </button>
         )}
         <div>
           <div className="qr-state">
             {scanned
-              ? `已扫码${session.nickname ? `：${session.nickname}` : ''}`
+              ? t.login.scanned(session.nickname)
               : session.type === 'qr'
-                ? `用${display}App扫码`
-                : '在打开的页面中完成登录'}
+                ? t.login.scanWith(display)
+                : t.login.finishInPage}
           </div>
-          <div className="qr-hint num">{scanned ? '请在手机上确认登录' : `剩余${remain}秒`}</div>
+          <div className="qr-hint num">{scanned ? t.login.confirmOnPhone : t.login.remaining(remain)}</div>
         </div>
       </div>
       {cancelButton}
@@ -214,7 +208,7 @@ function TokenForm({
   const { mutate } = submit
   const onSubmit = useCallback(() => mutate(value), [mutate, value])
   // 提交后会话仍处于等待状态直到校验结束，期间保持加载
-  useMainButton({ text: '提交', onClick: onSubmit, disabled: value === '', loading: submit.isPending || submit.isSuccess })
+  useMainButton({ text: t.login.submit, onClick: onSubmit, disabled: value === '', loading: submit.isPending || submit.isSuccess })
 
   // 插件给出的提示是 Telegram HTML，去掉标签后显示
   const prompt = session.content.replace(/<[^>]+>/g, '')
@@ -229,14 +223,14 @@ function TokenForm({
         )}
         <textarea
           className="textarea mono"
-          placeholder="粘贴token或cookie"
+          placeholder={t.login.tokenPlaceholder}
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
           value={token}
           onChange={(e) => setToken(e.target.value)}
         />
-        <div className="qr-hint num">请在{remain}秒内提交</div>
+        <div className="qr-hint num">{t.login.submitWithin(remain)}</div>
       </div>
       {cancelButton}
     </div>

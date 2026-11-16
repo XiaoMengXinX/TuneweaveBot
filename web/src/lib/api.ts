@@ -1,4 +1,5 @@
 import { initData } from './telegram'
+import { lang, t } from './i18n'
 
 export class ApiError extends Error {
   constructor(
@@ -24,17 +25,18 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
       method,
       headers: {
         Authorization: 'tma ' + initData,
+        'X-Language': lang,
         ...(body !== undefined && { 'Content-Type': 'application/json' }),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
-    throw new ApiError(0, '网络连接失败')
+    throw new ApiError(0, t.common.networkError)
   }
   const data = await res.json().catch(() => null)
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? `请求失败（${res.status}）`)
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? t.common.requestFailed(res.status))
   // 代理或网关可能以 200 返回自己的页面
-  if (data === null) throw new ApiError(res.status, '服务器返回了无法识别的内容')
+  if (data === null) throw new ApiError(res.status, t.common.badResponse)
   return data as T
 }
 
@@ -89,6 +91,9 @@ export interface Song {
   cached_at: number
 }
 
+/** 我的歌曲的排序方式，对应 store.SongOrder */
+export type SongOrder = 'recent' | 'oldest' | 'az' | 'za'
+
 export interface UserSong extends Song {
   last_at: number
   times: number
@@ -125,11 +130,44 @@ export interface Status {
   arch: string
   started_at: number
   providers: (Provider & { auth: AuthState })[]
-  downloads: { active: number; waiting: number; limit: number }
+  /** 字节：sys 是向系统申请的内存，heap 是使用中的堆 */
+  memory: { sys: number; heap: number }
   cache_chat: { id: number; name: string }
   cache_total: number
+  /** 缓存歌曲的文件总大小，字节 */
+  cache_size: number
   db_size: number
   cache_dir_size: number
+}
+
+export type DownloadPhase = 'waiting' | 'resolving' | 'downloading' | 'processing' | 'uploading'
+
+export interface DownloadTask {
+  id: number
+  provider: string
+  track_id: string
+  title: string
+  artists: string
+  album: string
+  phase: DownloadPhase
+  written: number
+  /** 未知时为 0 */
+  total: number
+  /** 字节/秒 */
+  speed: number
+  user_id: number
+  user_name: string
+  chat_id: number
+  chat_name: string
+  source: string
+  queued_at: number
+  /** 尚未拿到下载位时为 0 */
+  started_at: number
+}
+
+export interface Downloads {
+  limit: number
+  tasks: DownloadTask[]
 }
 
 export interface DayCount {
@@ -213,6 +251,14 @@ export interface UpdateCheck {
 export interface ConfigView {
   path: string
   sections: { name: string; items: { key: string; value: string; secret: boolean; set: boolean }[] }[]
+}
+
+export interface Logs {
+  date: string
+  today: string
+  /** 可切换的日期，新的在前 */
+  dates: string[]
+  entries: LogEntry[]
 }
 
 export interface LogEntry {
