@@ -4,6 +4,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -131,8 +132,17 @@ func (p PluginsConfig) HTTPClient() (*http.Client, error) {
 	return client, nil
 }
 
+// WebAppConfig 是 Telegram Mini App 看板的 HTTP 服务配置，URL 留空时不启动。
+type WebAppConfig struct {
+	Listen string `toml:"listen"`
+	URL    string `toml:"url"`
+}
+
+func (w WebAppConfig) Enabled() bool { return w.URL != "" }
+
 type Config struct {
 	Bot      BotConfig      `toml:"bot"`
+	WebApp   WebAppConfig   `toml:"webapp"`
 	Plugins  PluginsConfig  `toml:"plugins"`
 	Database DatabaseConfig `toml:"database"`
 	Download DownloadConfig `toml:"download"`
@@ -144,6 +154,9 @@ func Default() *Config {
 		Bot: BotConfig{
 			APIURL:        "https://api.telegram.org",
 			UploadTimeout: Duration(120 * time.Second),
+		},
+		WebApp: WebAppConfig{
+			Listen: "127.0.0.1:8080",
 		},
 		Plugins: PluginsConfig{
 			Dir:          "./plugins",
@@ -279,6 +292,15 @@ func (c *Config) Validate() error {
 	for _, id := range c.Bot.Admin {
 		if id <= 0 {
 			return fmt.Errorf("配置项 [bot] admin 包含非法 ID %d", id)
+		}
+	}
+	if c.WebApp.Enabled() {
+		// Telegram 只接受 HTTPS 的 Mini App 地址
+		if u, err := url.Parse(c.WebApp.URL); err != nil || u.Scheme != "https" || u.Host == "" {
+			return fmt.Errorf("配置项 [webapp] url %q 须为 https:// 开头的公网地址", c.WebApp.URL)
+		}
+		if _, _, err := net.SplitHostPort(c.WebApp.Listen); err != nil {
+			return fmt.Errorf("配置项 [webapp] listen %q 须为 host:port 形式的监听地址", c.WebApp.Listen)
 		}
 	}
 	if c.Plugins.Dir == "" {

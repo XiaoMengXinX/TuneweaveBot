@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,6 +81,7 @@ type App struct {
 	// 下载位的占用与排队数
 	downloadsActive  atomic.Int64
 	downloadsWaiting atomic.Int64
+	web              webState
 }
 
 // Run 阻塞运行 bot，返回 true 表示需重载配置
@@ -176,6 +178,13 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 
 	a.registerHandlers(tg)
 	a.setupCommands(runCtx, tg)
+	stopWebApp := func(time.Duration) {}
+	if cfg.WebApp.Enabled() {
+		if stopWebApp, err = a.startWebApp(runCtx); err != nil {
+			return false, fmt.Errorf("启动看板服务失败: %w", err)
+		}
+		a.setupWebAppEntry(runCtx)
+	}
 	a.checkCredentials(runCtx)
 	a.notifyRollbacks(runCtx)
 	go a.watchCookie(pollCtx)
@@ -185,17 +194,23 @@ func Run(ctx context.Context, cfg *config.Config, cfgPath string, log *logrus.Lo
 	// 等在途 handler 结束再由 defer 关闭 store 与插件，避免用到已关闭的资源。
 	// 重载时让当前任务正常完成；进程退出时 handler 已随 runCtx 取消，只需短暂等待。
 	reload := runCtx.Err() == nil && errors.Is(context.Cause(pollCtx), ErrReload)
+	// 看板服务先停：它不再接收请求之后，才不会有新的在途任务登记进来
 	if reload {
 		log.Infoln("已停止接收新消息，等待当前任务完成后重载")
+		stopWebApp(reloadDrainTimeout)
 		a.waitInflight(reloadDrainTimeout)
 		return true, nil
 	}
-	a.waitInflight(30 * time.Second)
+	stopWebApp(exitDrainTimeout)
+	a.waitInflight(exitDrainTimeout)
 	return false, nil
 }
 
-// reloadDrainTimeout 是重载前等待在途任务的上限。
-const reloadDrainTimeout = 10 * time.Minute
+// 重载、退出前等待在途任务的上限。
+const (
+	reloadDrainTimeout = 10 * time.Minute
+	exitDrainTimeout   = 30 * time.Second
+)
 
 // requestReload 停止接收新消息，在途任务完成后重新加载配置与插件。
 // 进行中的登录会话依赖新消息或长时间等待，直接结束。

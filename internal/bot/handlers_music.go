@@ -32,6 +32,15 @@ func (a *App) handleStart(ctx context.Context, tg *tgb.Bot, update *models.Updat
 	}
 	ref, ok := a.parseStartParam(commandArguments(m))
 	if !ok {
+		if a.cfg.WebApp.Enabled() {
+			if _, err := tg.SendMessage(ctx, &tgb.SendMessageParams{
+				ChatID:      m.Chat.ID,
+				Text:        render.WebAppWelcome,
+				ReplyMarkup: webAppKeyboard(a.cfg.WebApp.URL),
+			}); err != nil {
+				a.log.Errorln(err)
+			}
+		}
 		return
 	}
 	if err := a.processMusic(ctx, ref, messageTarget(m, sourceStart), nil); err != nil {

@@ -26,6 +26,10 @@ func GenerateTemplate(schemas []plugin.PluginConfigSchema) []byte {
 	b.WriteString("cache_chat = 0                          # 缓存群 ID，Guest Mode 点歌时先把未缓存的歌曲上传到这里；0 为关闭，可用 /setcachechat 设置\n")
 	b.WriteString("debug = false                           # 在终端输出 SDK 调试日志，[log] level 为 debug 时同时写入日志文件\n\n")
 
+	b.WriteString("[webapp]\n")
+	b.WriteString("url = \"\"                                # 看板（Mini App）的公网 HTTPS 地址，填写后启用并自动注册到 bot 的 Menu Button；留空不启动\n")
+	fmt.Fprintf(&b, "listen = %s               # 看板 HTTP 服务的监听地址，由 cloudflared 或反向代理转发到这里；保持只监听本机\n\n", strconv.Quote(d.WebApp.Listen))
+
 	b.WriteString("[plugins]\n")
 	fmt.Fprintf(&b, "dir = %s                       # 插件目录，支持 .wasm 与 .wasm.gz；构建产物在 dist/plugins\n", strconv.Quote(d.Plugins.Dir))
 	b.WriteString("enabled = []                            # 要加载的插件名（文件名去掉 .wasm / .wasm.gz）；留空 = 加载目录下全部\n")

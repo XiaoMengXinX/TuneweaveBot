@@ -360,3 +360,11 @@ func AuthLine(name string, available bool) string {
 	}
 	return fmt.Sprintf("%s: %s", Escape(name), status)
 }
+
+const (
+	LoginNoSessionWeb = "当前没有进行中的登录会话"
+
+	WebAppButton  = "看板"
+	WebAppOpen    = "打开看板"
+	WebAppWelcome = "点击下方按钮打开看板，查看点过的歌曲或搜索点歌。"
+)
