@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -24,10 +25,13 @@ func (e *SchemaError) Error() string {
 	return msg
 }
 
+// schemaModels 是数据库应有的全部表，结构校验以这些 gorm 模型为准。
+var schemaModels = []any{&SongInfo{}, &PluginKV{}, &SongRequest{}}
+
 // requiredTables 是每张表必需的列，取自对应的 gorm 模型，与模型定义保持同步。
 func requiredTables(db *gorm.DB) (map[string][]string, error) {
 	tables := map[string][]string{}
-	for _, model := range []any{&SongInfo{}, &PluginKV{}} {
+	for _, model := range schemaModels {
 		stmt := &gorm.Statement{DB: db}
 		if err := stmt.Parse(model); err != nil {
 			return nil, err
@@ -56,7 +60,7 @@ func validateSchema(db *gorm.DB, path string, requireAll bool) error {
 	if err != nil {
 		return err
 	}
-	for _, table := range []string{"song_infos", "plugin_kv"} {
+	for _, table := range slices.Sorted(maps.Keys(tables)) {
 		cols, err := tableColumns(db, table)
 		if err != nil {
 			return err
