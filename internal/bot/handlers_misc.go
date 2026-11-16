@@ -211,26 +211,34 @@ func (a *App) handleSetCacheChat(ctx context.Context, tg *tgb.Bot, update *model
 		}
 		chatID = id
 	}
-	if chatID != 0 && chatID != m.Chat.ID {
-		if _, err := a.sendMessage(ctx, chatID, render.CacheChatTest, 0); err != nil {
-			a.log.Errorln(err)
-			if _, err := a.reply(ctx, m, render.CacheChatUnreachable); err != nil {
-				a.log.Errorln(err)
-			}
-			return
-		}
-	}
-
-	a.cacheChat.Store(chatID)
+	persistErr, err := a.setCacheChat(ctx, chatID, chatID != m.Chat.ID)
 	text := render.CacheChatDisabled
-	if chatID != 0 {
+	switch {
+	case err != nil:
+		a.log.Errorln(err)
+		text = render.CacheChatUnreachable
+	case chatID != 0:
 		text = render.CacheChatSet(chatID)
 	}
-	if err := config.UpdateCacheChat(a.cfgPath, chatID); err != nil {
-		a.log.Errorln(err)
-		text += "\n配置文件写入失败: " + render.Escape(err.Error()) + "\n本次设置已生效，重启后将失效"
+	if persistErr != nil {
+		text += "\n配置文件写入失败: " + render.Escape(persistErr.Error()) + "\n本次设置已生效，重启后将失效"
 	}
 	if _, err := a.reply(ctx, m, text); err != nil {
 		a.log.Errorln(err)
 	}
+}
+
+// setCacheChat 切换缓存群并写回配置；chatID 为 0 时关闭。probe 为 true 时先向目标群发一条
+// 测试消息，发不出去则返回 err 且不切换。persistErr 表示设置已生效但配置文件写入失败。
+func (a *App) setCacheChat(ctx context.Context, chatID int64, probe bool) (persistErr, err error) {
+	if chatID != 0 && probe {
+		if _, err := a.sendMessage(ctx, chatID, render.CacheChatTest, 0); err != nil {
+			return nil, err
+		}
+	}
+	a.cacheChat.Store(chatID)
+	if persistErr = config.UpdateCacheChat(a.cfgPath, chatID); persistErr != nil {
+		a.log.Errorln(persistErr)
+	}
+	return persistErr, nil
 }

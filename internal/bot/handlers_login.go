@@ -122,7 +122,18 @@ func (a *App) runQRLogin(ctx context.Context, auth provider.Authenticator, m *mo
 		})
 		return err
 	}
-	a.pollQRLogin(ctx, auth, challenge.Key, editCaption)
+	a.pollQRLogin(ctx, auth, challenge.Key, func(ev loginEvent) {
+		text, markup := ev.text(), emptyKeyboard()
+		switch ev.state {
+		case loginWaiting:
+			text, markup = render.LoginQRCaption(ev.remain), cancelLoginKeyboard()
+		case loginScanned:
+			markup = cancelLoginKeyboard()
+		}
+		if err := editCaption(text, markup); err != nil && ev.state == loginScanned {
+			a.log.Errorln(err)
+		}
+	})
 }
 
 // runTokenLogin 提示用户回复 token，捕获后提交校验。
@@ -156,33 +167,82 @@ func (a *App) runTokenLogin(ctx context.Context, auth provider.Authenticator, m 
 		}
 	}
 	if !ok {
-		switch cause := context.Cause(ctx); {
-		case errors.Is(cause, errLoginCancelled):
-			edit(render.LoginCancelled)
-		case errors.Is(cause, ErrReload):
-			edit(render.LoginReloading)
-		default:
-			edit(render.LoginExpired)
-		}
+		edit(loginAbortEvent(ctx).text())
 		return
 	}
 
-	state, err := auth.Submit(ctx, challenge.Key, token)
+	edit(a.submitToken(ctx, auth, challenge.Key, token).text())
+}
+
+// submitToken 提交 token 并在校验通过后应用凭据，返回终态。
+func (a *App) submitToken(ctx context.Context, auth provider.Authenticator, key, token string) loginEvent {
+	state, err := auth.Submit(ctx, key, token)
 	if err != nil {
 		a.log.Errorln(err)
-		edit(render.LoginCheckFailed)
-		return
+		return loginEvent{state: loginCheckFailed}
 	}
 	if state.State != provider.AuthSuccess {
-		edit(render.LoginFailed)
-		return
+		return loginEvent{state: loginFailed}
 	}
 	note, err := a.finishLogin(auth, state)
 	if err != nil {
-		edit(render.LoginFailed + render.Escape(note))
-		return
+		return loginEvent{state: loginFailed, note: note}
 	}
-	edit(render.LoginOK(state.Nickname) + render.Escape(note))
+	return loginEvent{state: loginSuccess, nickname: state.Nickname, note: note}
+}
+
+// 登录会话的状态；waiting 与 scanned 之外都是终态。
+const (
+	loginWaiting     = "waiting"
+	loginScanned     = "scanned"
+	loginSuccess     = "success"
+	loginFailed      = "failed"
+	loginExpired     = "expired"
+	loginCancelled   = "cancelled"
+	loginReloading   = "reloading"
+	loginCheckFailed = "check_failed"
+)
+
+// loginEvent 是登录会话的进展，由 Telegram 消息或看板各自展示。
+type loginEvent struct {
+	state    string
+	nickname string
+	note     string // 配置写回失败等附加说明
+	remain   int    // waiting：二维码剩余有效秒数
+}
+
+func (e loginEvent) terminal() bool { return e.state != loginWaiting && e.state != loginScanned }
+
+// text 是事件在 Telegram 消息中的文案。
+func (e loginEvent) text() string {
+	switch e.state {
+	case loginScanned:
+		return render.LoginScanned(e.nickname)
+	case loginSuccess:
+		return render.LoginOK(e.nickname) + render.Escape(e.note)
+	case loginFailed:
+		return render.LoginFailed + render.Escape(e.note)
+	case loginExpired:
+		return render.LoginExpired
+	case loginCancelled:
+		return render.LoginCancelled
+	case loginReloading:
+		return render.LoginReloading
+	case loginCheckFailed:
+		return render.LoginCheckFailed
+	}
+	return ""
+}
+
+// loginAbortEvent 把会话 ctx 的结束原因映射为终态；非取消、非重载的结束视为过期。
+func loginAbortEvent(ctx context.Context) loginEvent {
+	switch cause := context.Cause(ctx); {
+	case errors.Is(cause, errLoginCancelled):
+		return loginEvent{state: loginCancelled}
+	case errors.Is(cause, ErrReload):
+		return loginEvent{state: loginReloading}
+	}
+	return loginEvent{state: loginExpired}
 }
 
 func cancelLoginKeyboard() models.InlineKeyboardMarkup {
@@ -283,7 +343,8 @@ func (a *App) handleCallbackCancelLogin(ctx context.Context, tg *tgb.Bot, update
 	}
 }
 
-func (a *App) pollQRLogin(ctx context.Context, auth provider.Authenticator, key string, editCaption func(string, models.ReplyMarkup) error) {
+// pollQRLogin 轮询扫码结果并通过 report 上报进展，直到会话进入终态。
+func (a *App) pollQRLogin(ctx context.Context, auth provider.Authenticator, key string, report func(loginEvent)) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	countdown := time.NewTicker(10 * time.Second)
@@ -292,27 +353,25 @@ func (a *App) pollQRLogin(ctx context.Context, auth provider.Authenticator, key 
 	deadline := time.After(5 * time.Minute) // 二维码约 3 分钟过期，此处兜底
 	// 803 可能不带昵称，保留 802 的昵称
 	var scannedNick string
+	var scanned bool
 	var failures int
 	for {
 		select {
 		case <-ctx.Done():
 			switch cause := context.Cause(ctx); {
 			case errors.Is(cause, errLoginCancelled):
-				_ = editCaption(render.LoginCancelled, emptyKeyboard())
+				report(loginEvent{state: loginCancelled})
 			case errors.Is(cause, ErrReload):
-				_ = editCaption(render.LoginReloading, emptyKeyboard())
+				report(loginEvent{state: loginReloading})
 			}
 			return
 		case <-deadline:
-			_ = editCaption(render.LoginExpired, emptyKeyboard())
+			report(loginEvent{state: loginExpired})
 			return
 		case <-countdown.C:
-			remain := int(math.Ceil(time.Until(expiresAt).Seconds()))
-			if remain < 0 {
-				remain = 0
-			}
-			if scannedNick == "" {
-				_ = editCaption(render.LoginQRCaption(remain), cancelLoginKeyboard())
+			if !scanned {
+				remain := max(0, int(math.Ceil(time.Until(expiresAt).Seconds())))
+				report(loginEvent{state: loginWaiting, remain: remain})
 			}
 		case <-ticker.C:
 			state, err := auth.Poll(ctx, key)
@@ -320,7 +379,7 @@ func (a *App) pollQRLogin(ctx context.Context, auth provider.Authenticator, key 
 				failures++
 				if failures >= 10 {
 					a.log.Errorln(err)
-					_ = editCaption(render.LoginCheckFailed, emptyKeyboard())
+					report(loginEvent{state: loginCheckFailed})
 					return
 				}
 				continue
@@ -329,11 +388,9 @@ func (a *App) pollQRLogin(ctx context.Context, auth provider.Authenticator, key 
 			switch state.State {
 			case provider.AuthWaiting:
 			case provider.AuthScanned:
-				if scannedNick == "" {
-					scannedNick = state.Nickname
-					if err := editCaption(render.LoginScanned(state.Nickname), cancelLoginKeyboard()); err != nil {
-						a.log.Errorln(err)
-					}
+				if !scanned {
+					scanned, scannedNick = true, state.Nickname
+					report(loginEvent{state: loginScanned, nickname: state.Nickname})
 				}
 			case provider.AuthSuccess:
 				if state.Nickname == "" {
@@ -341,13 +398,13 @@ func (a *App) pollQRLogin(ctx context.Context, auth provider.Authenticator, key 
 				}
 				note, err := a.finishLogin(auth, state)
 				if err != nil {
-					_ = editCaption(render.LoginFailed+render.Escape(note), emptyKeyboard())
+					report(loginEvent{state: loginFailed, note: note})
 					return
 				}
-				_ = editCaption(render.LoginOK(state.Nickname)+render.Escape(note), emptyKeyboard())
+				report(loginEvent{state: loginSuccess, nickname: state.Nickname, note: note})
 				return
 			case provider.AuthExpired:
-				_ = editCaption(render.LoginExpired, emptyKeyboard())
+				report(loginEvent{state: loginExpired})
 				return
 			}
 		}

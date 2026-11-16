@@ -182,28 +182,46 @@ func (a *App) handleCallbackUpdate(ctx context.Context, tg *tgb.Bot, update *mod
 	a.answerCallback(ctx, query.ID, "")
 	report(render.UpdatingPlugins)
 
-	applyCtx, cancel := context.WithTimeout(ctx, updateApplyTimeout)
-	defer cancel()
+	results := a.applyUpdates(ctx, offer.names)
 	var updated, failed []string
-	for _, name := range offer.names {
-		u, err := a.plugins.ApplyUpdate(applyCtx, name)
-		switch {
-		case err == nil:
-			updated = append(updated, render.PluginUpdateLine(u.DisplayName, u.Name,
-				render.PluginVersion(u.Current.Version, u.Current.BuildTime),
-				render.PluginVersion(u.Latest.Version, u.Latest.BuildTime)))
-			a.log.Infof("插件 %s 已更新到 %s（%s）", name, u.Latest.Version, u.Latest.BuildTime)
-		case errors.Is(err, plugin.ErrUpToDate):
-			failed = append(failed, render.PluginUpdateFailedLine(a.pluginDisplayName(name), name, err.Error()))
-		default:
-			a.log.Errorf("更新插件 %s 失败: %v", name, err)
-			failed = append(failed, render.PluginUpdateFailedLine(a.pluginDisplayName(name), name, err.Error()))
+	for _, r := range results {
+		if r.err != nil {
+			failed = append(failed, render.PluginUpdateFailedLine(a.pluginDisplayName(r.name), r.name, r.err.Error()))
+			continue
 		}
+		updated = append(updated, render.PluginUpdateLine(r.update.DisplayName, r.update.Name,
+			render.PluginVersion(r.update.Current.Version, r.update.Current.BuildTime),
+			render.PluginVersion(r.update.Latest.Version, r.update.Latest.BuildTime)))
 	}
 	report(render.PluginUpdateResult(updated, failed))
 	if len(updated) > 0 {
 		a.requestReload()
 	}
+}
+
+// updateResult 是单个插件的更新结果，err 为 nil 表示新文件已就位。
+type updateResult struct {
+	name   string
+	update plugin.Update
+	err    error
+}
+
+// applyUpdates 逐个下载并替换插件文件，新版本在重载后生效。调用方须持有 a.updating。
+func (a *App) applyUpdates(ctx context.Context, names []string) []updateResult {
+	applyCtx, cancel := context.WithTimeout(ctx, updateApplyTimeout)
+	defer cancel()
+	results := make([]updateResult, 0, len(names))
+	for _, name := range names {
+		u, err := a.plugins.ApplyUpdate(applyCtx, name)
+		switch {
+		case err == nil:
+			a.log.Infof("插件 %s 已更新到 %s（%s）", name, u.Latest.Version, u.Latest.BuildTime)
+		case !errors.Is(err, plugin.ErrUpToDate):
+			a.log.Errorf("更新插件 %s 失败: %v", name, err)
+		}
+		results = append(results, updateResult{name: name, update: u, err: err})
+	}
+	return results
 }
 
 // notifyRollbacks 告知管理员本次启动中因新版本加载失败而回滚的插件。
