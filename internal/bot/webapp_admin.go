@@ -43,7 +43,7 @@ func (a *App) apiStatus(r *http.Request, user webapp.User) (any, error) {
 		}
 		providers = append(providers, status)
 	}
-	total, size, err := a.store.CacheTotals()
+	total, size, err := a.cacheTotals()
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +129,25 @@ func (a *App) chatName(ctx context.Context, id int64) string {
 	a.web.names[id] = name
 	a.web.namesMu.Unlock()
 	return name
+}
+
+type cachedTotals struct {
+	at          time.Time
+	songs, size int64
+}
+
+// cacheTotals 返回缓存歌曲数与总大小，结果在内存中保留 statsTTL。
+func (a *App) cacheTotals() (songs, size int64, err error) {
+	a.web.totalsMu.Lock()
+	defer a.web.totalsMu.Unlock()
+	if t := a.web.totals; time.Since(t.at) < statsTTL {
+		return t.songs, t.size, nil
+	}
+	if songs, size, err = a.store.CacheTotals(); err != nil {
+		return 0, 0, err
+	}
+	a.web.totals = cachedTotals{at: time.Now(), songs: songs, size: size}
+	return songs, size, nil
 }
 
 type statsKey struct {

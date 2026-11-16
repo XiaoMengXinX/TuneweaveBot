@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -120,5 +121,40 @@ func TestRequestsAndStats(t *testing.T) {
 	}
 	if _, total, _ := s.UserSongs(7, "", OrderRecent, 10, 0); total != 1 {
 		t.Errorf("删除后 total = %d, want 1", total)
+	}
+}
+
+// created_at 里混有不同时区偏移的文本，每日新增缓存须按换算后的日期统计，粗过滤不能漏行。
+func TestStatsMixedTimezones(t *testing.T) {
+	s := open(t, filepath.Join(t.TempDir(), "new.db"))
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	// 统计 7 天，起点为 11-11（UTC）
+	for i, createdAt := range []string{
+		"2026-11-10 20:30:00.1+08:00",         // UTC 11-10 12:30，区间之前
+		"2026-11-11 07:00:00.123456+08:00",    // UTC 11-10 23:00，区间之前
+		"2026-11-12 03:00:00.5+08:00",         // UTC 11-11 19:00，计入 11-11
+		"2026-11-10 22:00:00.000001-05:00",    // UTC 11-11 03:00，文本日期早于区间但应计入 11-11
+		"2026-11-17 09:00:00.433176999+00:00", // 今天
+	} {
+		song := &SongInfo{Provider: "netease", TrackID: strconv.Itoa(i), FileID: "f"}
+		if err := s.Save(song); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.db.Exec("UPDATE song_infos SET created_at = ? WHERE id = ?", createdAt, song.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	stats, err := s.Stats(now, 7, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, d := range stats.Cached {
+		if d.Count > 0 {
+			got[d.Day] = d.Count
+		}
+	}
+	if len(got) != 2 || got["2026-11-11"] != 2 || got["2026-11-17"] != 1 {
+		t.Errorf("每日新增缓存 = %v, want 11-11:2 11-17:1", got)
 	}
 }

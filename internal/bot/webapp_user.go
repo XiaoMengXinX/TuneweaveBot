@@ -50,7 +50,7 @@ func (a *App) apiOverview(r *http.Request, user webapp.User) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	total, _, err := a.store.CacheTotals()
+	total, _, err := a.cacheTotals()
 	if err != nil {
 		return nil, err
 	}

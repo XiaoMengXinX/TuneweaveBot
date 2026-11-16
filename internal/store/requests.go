@@ -194,10 +194,14 @@ func (s *Store) Stats(now time.Time, days int, provider string) (Stats, error) {
 	}
 	args := func(first ...any) []any { return append(first, providerArgs...) }
 
+	// created_at 是带时区偏移的文本（导入的旧数据为 +08:00，新数据为写入时的时区），不能直接按
+	// 字符串比较时间。先用字符串粗过滤让查询走 idx_song_infos_live_created：文本开头的日期与换算到
+	// 当前时区后的日期最多相差两天，所以提前两天的下界不会漏掉行；再用 date() 精确判断。
+	roughStart := start.AddDate(0, 0, -2).Format(time.DateOnly)
 	var cached []DayCount
 	if err := s.db.Raw(`SELECT date(s.created_at, ?) AS day, COUNT(*) AS count FROM song_infos AS s
-		WHERE s.deleted_at IS NULL AND date(s.created_at, ?) >= ?`+providerCond+` GROUP BY day`,
-		args(secondsModifier(offset), secondsModifier(offset), startDay)...).Scan(&cached).Error; err != nil {
+		WHERE s.deleted_at IS NULL AND s.created_at >= ? AND date(s.created_at, ?) >= ?`+providerCond+` GROUP BY day`,
+		args(secondsModifier(offset), roughStart, secondsModifier(offset), startDay)...).Scan(&cached).Error; err != nil {
 		return out, err
 	}
 	out.Cached = fillDays(cached, start, days)

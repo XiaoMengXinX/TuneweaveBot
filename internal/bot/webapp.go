@@ -26,10 +26,13 @@ type webState struct {
 	guard   *webGuard
 	statsMu sync.Mutex
 	stats   map[statsKey]cachedStats
-	namesMu sync.Mutex
-	names   map[int64]string // 用户/聊天 ID -> 显示名，仅缓存查询成功的结果
-	loginMu sync.Mutex       // 保护 login
-	login   *webLogin
+	// 缓存总数与总大小：管理首页每 10 秒刷新一次，这两项不需要这么新
+	totalsMu sync.Mutex
+	totals   cachedTotals
+	namesMu  sync.Mutex
+	names    map[int64]string // 用户/聊天 ID -> 显示名，仅缓存查询成功的结果
+	loginMu  sync.Mutex       // 保护 login
+	login    *webLogin
 }
 
 // startWebApp 监听 [webapp] listen 并在后台提供面板服务，返回的函数停止接收新请求并等待
