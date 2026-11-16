@@ -1,8 +1,8 @@
-import { useInfiniteQuery } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { SongCell, songSubtitle } from '../components/SongList'
 import { CellSkeleton, Chips, Empty, ErrorState, SearchField } from '../components/ui'
-import { get, query, type Me, type SearchPage } from '../lib/api'
+import { get, query, type Me, type SearchResults } from '../lib/api'
 import { formatTrack } from '../lib/format'
 import { refKey, useSendSong } from '../lib/hooks'
 import { t } from '../lib/i18n'
@@ -12,34 +12,16 @@ export function Search({ me, hidden }: { me: Me; hidden: boolean }) {
   const [keyword, setKeyword] = useState('')
   const [provider, setProvider] = useState(() => me.providers.find((p) => p.default)?.name ?? '')
   const { send, sending } = useSendSong()
-  const sentinel = useRef<HTMLDivElement>(null)
 
-  const results = useInfiniteQuery({
+  // 接口一次返回全部结果（bot 最多展示的条数）
+  const results = useQuery({
     queryKey: ['search', provider, keyword],
-    queryFn: ({ pageParam }) => get<SearchPage>('/search' + query({ q: keyword, provider, offset: pageParam })),
+    queryFn: () => get<SearchResults>('/search' + query({ q: keyword, provider })),
     enabled: keyword !== '',
-    initialPageParam: 0,
-    getNextPageParam: (last, pages) => {
-      const loaded = pages.reduce((n, p) => n + p.items.length, 0)
-      return last.items.length >= last.page_size && loaded < last.total ? loaded : undefined
-    },
     staleTime: 5 * 60 * 1000,
     retry: false,
   })
-  const items = results.data?.pages.flatMap((p) => p.items) ?? []
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = results
-
-  // 滚到列表末尾时加载下一页
-  useEffect(() => {
-    const el = sentinel.current
-    if (!el || !hasNextPage) return
-    const observer = new IntersectionObserver(
-      ([entry]) => entry.isIntersecting && !isFetchingNextPage && fetchNextPage(),
-      { rootMargin: '200px' },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, items.length])
+  const items = results.data?.items ?? []
 
   return (
     <div className="page tab-in" hidden={hidden}>
@@ -76,31 +58,23 @@ export function Search({ me, hidden }: { me: Me; hidden: boolean }) {
           {t.search.noneHint}
         </Empty>
       ) : (
-        <>
-          <div className="card">
-            {items.map((item) => (
-              <SongCell
-                key={refKey(item)}
-                title={item.title}
-                subtitle={songSubtitle(item)}
-                busy={sending === refKey(item)}
-                onClick={() => send({ provider: item.provider, id: item.id, sub: item.sub })}
-                side={
-                  <>
-                    {item.cached && <span className="badge accent">{t.search.cached}</span>}
-                    {item.duration > 0 && <span className="num">{formatTrack(item.duration)}</span>}
-                  </>
-                }
-              />
-            ))}
-          </div>
-          <div ref={sentinel} style={{ height: 1 }} />
-          {isFetchingNextPage && (
-            <div style={{ marginTop: 10 }}>
-              <CellSkeleton rows={2} />
-            </div>
-          )}
-        </>
+        <div className="card">
+          {items.map((item) => (
+            <SongCell
+              key={refKey(item)}
+              title={item.title}
+              subtitle={songSubtitle(item)}
+              busy={sending === refKey(item)}
+              onClick={() => send({ provider: item.provider, id: item.id, sub: item.sub })}
+              side={
+                <>
+                  {item.cached && <span className="badge accent">{t.search.cached}</span>}
+                  {item.duration > 0 && <span className="num">{formatTrack(item.duration)}</span>}
+                </>
+              }
+            />
+          ))}
+        </div>
       )}
     </div>
   )

@@ -140,20 +140,19 @@ export async function handle(method: string, url: string, body: unknown): Promis
     }
     case 'GET /search': {
       const q = search.get('q') ?? ''
-      if (q === 'nothing') return { items: [], total: 0, page_size: 8 }
+      if (q === 'nothing') return { items: [] } satisfies T.SearchResults
       const provider = PROVIDERS.find((p) => p.name === search.get('provider')) ?? PROVIDERS[0]
-      const offset = Number(search.get('offset') ?? 0)
-      const items: T.SearchItem[] = Array.from({ length: offset >= 24 ? 0 : 8 }, (_, i) => ({
+      const items: T.SearchItem[] = Array.from({ length: 40 }, (_, i) => ({
         provider: provider.name,
-        id: String(5000 + offset + i),
+        id: String(5000 + i),
         provider_name: provider.display,
-        title: i === 0 && offset === 0 ? q : `${q} ${TITLES[(offset + i * 3) % TITLES.length]}`,
-        artists: ARTISTS[(offset + i) % ARTISTS.length],
-        album: ALBUMS[(offset + i) % ALBUMS.length],
-        duration: 180 + ((offset + i) * 17) % 120,
-        cached: (offset + i) % 3 === 0,
+        title: i === 0 ? q : `${q} ${TITLES[(i * 3) % TITLES.length]}`,
+        artists: ARTISTS[i % ARTISTS.length],
+        album: ALBUMS[i % ALBUMS.length],
+        duration: 180 + ((i * 17) % 120),
+        cached: i % 3 === 0,
       }))
-      return { items, total: 24, page_size: 8 } satisfies T.SearchPage
+      return { items } satisfies T.SearchResults
     }
     case 'POST /music':
       if (params.get('cooldown') === '1') throw new ApiError(429, '操作太频繁，请 8 秒后再试')

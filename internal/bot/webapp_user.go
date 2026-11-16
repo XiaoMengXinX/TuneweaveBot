@@ -106,8 +106,7 @@ func (a *App) apiSearch(r *http.Request, user webapp.User) (any, error) {
 			return nil, badRequest(msgUnknownProvider)
 		}
 	}
-	_, offset := pageParams(r)
-	// 缓存未命中才会请求音乐平台，只在这时限流；翻页取的是同一份缓存
+	// 缓存未命中才会请求音乐平台，只在这时限流
 	results, ok := a.cachedSearch(providerName, keyword)
 	if !ok {
 		if ok, retryAfter := a.web.guard.bySearch.allow(user.ID, time.Now()); !ok {
@@ -125,7 +124,6 @@ func (a *App) apiSearch(r *http.Request, user webapp.User) (any, error) {
 			return nil, &apiError{http.StatusBadGateway, msgSearchFailed}
 		}
 	}
-	summaries := results[min(offset, len(results)):min(offset+searchPageSize, len(results))]
 	type item struct {
 		refDTO
 		ProviderName string `json:"provider_name"`
@@ -135,8 +133,8 @@ func (a *App) apiSearch(r *http.Request, user webapp.User) (any, error) {
 		Duration     int    `json:"duration"`
 		Cached       bool   `json:"cached"`
 	}
-	items := make([]item, 0, len(summaries))
-	for _, s := range summaries {
+	items := make([]item, 0, len(results))
+	for _, s := range results {
 		// 子资源（节目等）的缓存键需要归一后才知道，这里不标记
 		cached := false
 		if s.Sub == "" {
@@ -153,7 +151,7 @@ func (a *App) apiSearch(r *http.Request, user webapp.User) (any, error) {
 			Cached:       cached,
 		})
 	}
-	return map[string]any{"items": items, "total": len(results), "page_size": searchPageSize}, nil
+	return map[string]any{"items": items}, nil
 }
 
 // apiMusic 把歌曲发到用户与 bot 的私聊：命中缓存时直接发送，否则下载后发送。

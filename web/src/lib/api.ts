@@ -116,8 +116,8 @@ export interface SearchItem {
   cached: boolean
 }
 
-export interface SearchPage extends Page<SearchItem> {
-  page_size: number
+export interface SearchResults {
+  items: SearchItem[]
 }
 
 export type AuthState = 'ok' | 'expired' | 'none'
