@@ -338,15 +338,15 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 	if err := status(render.FetchInfo); err != nil {
 		return songInfo, err
 	}
+	interval := statusInterval(chatID)
 
 	if track == nil {
-		// 插件在 resolve 内经 media.download 下载时的进度，节流 5s
-		var lastProgress int64
+		// 插件在 resolve 内经 media.download 下载时的进度
+		due := throttle(interval)
 		resolveCtx := plugin.WithDownloadProgress(ctx, func(p plugin.DownloadProgress) {
-			if p.Total <= 0 || time.Now().Unix()-lastProgress < 5 {
+			if p.Total <= 0 || !due() {
 				return
 			}
-			lastProgress = time.Now().Unix()
 			text := render.TransferWithInfo(p.Title, p.Album, "", render.Downloading, p.Speed, p.Written, p.Total)
 			if err := status(text); err != nil {
 				a.log.Errorln(err)
@@ -424,9 +424,9 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 	}
 	musicPath := filepath.Join(a.cacheDir, musicFileName)
 
-	var lastUpdateTime int64
+	due := throttle(interval)
 	onProgress := func(p fetch.Progress) {
-		if time.Now().Unix()-lastUpdateTime < 5 {
+		if !due() {
 			return
 		}
 		statusText := render.Downloading
@@ -436,7 +436,6 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		if err := status(render.TransferWithInfo(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, statusText, p.Speed, p.Written, p.Total)); err != nil {
 			a.log.Errorln(err)
 		}
-		lastUpdateTime = time.Now().Unix()
 	}
 
 	if mediaPath != "" {
@@ -543,7 +542,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		return songInfo, err
 	}
 
-	progress, stopProgress := a.watchUpload(status, songInfo)
+	progress, stopProgress := a.watchUpload(status, songInfo, interval)
 	audio, err := a.sendMusic(ctx, songInfo, track, filePath, resizePicPath, chatID, reply, progress)
 	stopProgress()
 	if err != nil {
@@ -658,12 +657,36 @@ func (a *App) cachedMusicResult(id string, songInfo store.SongInfo, track *provi
 	}
 }
 
-// uploadStatusInterval 是上传进度刷新状态消息的间隔。
-var uploadStatusInterval = 5 * time.Second
+// 下载与上传进度刷新状态消息的间隔，取决于 Telegram 对同一聊天的消息频率限制：
+// 私聊约每秒 1 条，群聊约每分钟 20 条（发送与编辑合计）。
+const (
+	privateStatusInterval = time.Second
+	groupStatusInterval   = 3 * time.Second
+)
 
-// watchUpload 在上传开始时显示进度，之后定期刷新。返回的 progress 交给上传使用；stop 停止
-// 刷新并等待进行中的编辑完成，之后才能写入其他状态。
-func (a *App) watchUpload(status func(string) error, songInfo store.SongInfo) (progress uploadProgress, stop func()) {
+// statusInterval 按聊天类型返回进度刷新间隔；Telegram 中只有用户（私聊）的 ID 为正数。
+func statusInterval(chatID int64) time.Duration {
+	if chatID > 0 {
+		return privateStatusInterval
+	}
+	return groupStatusInterval
+}
+
+// throttle 返回的函数在距上次放行不足 interval 时返回 false。
+func throttle(interval time.Duration) func() bool {
+	var last time.Time
+	return func() bool {
+		if time.Since(last) < interval {
+			return false
+		}
+		last = time.Now()
+		return true
+	}
+}
+
+// watchUpload 在上传开始时显示进度，之后每隔 interval 刷新。返回的 progress 交给上传使用；
+// stop 停止刷新并等待进行中的编辑完成，之后才能写入其他状态。
+func (a *App) watchUpload(status func(string) error, songInfo store.SongInfo, interval time.Duration) (progress uploadProgress, stop func()) {
 	var sent, total atomic.Int64
 	var startOnce sync.Once
 	started, done, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -674,7 +697,7 @@ func (a *App) watchUpload(status func(string) error, songInfo store.SongInfo) (p
 			return
 		case <-started:
 		}
-		ticker := time.NewTicker(uploadStatusInterval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		last := sent.Load()
 		for {
@@ -683,7 +706,7 @@ func (a *App) watchUpload(status func(string) error, songInfo store.SongInfo) (p
 				a.showStatus(status, render.MusicStatus(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.UploadWaiting))
 				return
 			}
-			speed := float64(s-last) / uploadStatusInterval.Seconds()
+			speed := float64(s-last) / interval.Seconds()
 			a.showStatus(status, render.TransferWithInfo(songInfo.SongName, songInfo.SongAlbum, songInfo.FileExt, render.UploadProgress, render.Speed(speed), s, t))
 			last = s
 			select {

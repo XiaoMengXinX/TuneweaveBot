@@ -172,9 +172,6 @@ func TestUploadProgress(t *testing.T) {
 }
 
 func TestWatchUpload(t *testing.T) {
-	old := uploadStatusInterval
-	uploadStatusInterval = 20 * time.Millisecond
-	defer func() { uploadStatusInterval = old }()
 
 	var mu sync.Mutex
 	var texts []string
@@ -185,7 +182,7 @@ func TestWatchUpload(t *testing.T) {
 		return nil
 	}
 	a := &App{}
-	progress, stop := a.watchUpload(status, store.SongInfo{SongName: "晴天", FileExt: "flac"})
+	progress, stop := a.watchUpload(status, store.SongInfo{SongName: "晴天", FileExt: "flac"}, 20*time.Millisecond)
 	progress(10<<20, 40<<20)
 	time.Sleep(50 * time.Millisecond)
 	progress(40<<20, 40<<20)
@@ -209,16 +206,12 @@ func TestWatchUpload(t *testing.T) {
 }
 
 func TestWatchUploadShowsFirstFrameImmediately(t *testing.T) {
-	old := uploadStatusInterval
-	uploadStatusInterval = time.Hour
-	defer func() { uploadStatusInterval = old }()
-
 	shown := make(chan string, 1)
 	a := &App{}
 	progress, stop := a.watchUpload(func(s string) error {
 		shown <- s
 		return nil
-	}, store.SongInfo{SongName: "散歩道"})
+	}, store.SongInfo{SongName: "散歩道"}, time.Hour)
 	defer stop()
 	progress(0, 40<<20)
 	select {
