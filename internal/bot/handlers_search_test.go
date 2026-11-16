@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,10 +118,10 @@ func newSearchTest(t *testing.T, total int) (*App, *tgb.Bot, *searchTelegram) {
 		t.Fatal(err)
 	}
 	p := newFakeProvider()
-	p.searchFn = func(_ context.Context, _ string, _ int, offset int) ([]provider.TrackSummary, int, error) {
+	p.searchFn = func(_ context.Context, _ string, limit, offset int) ([]provider.TrackSummary, int, error) {
 		fake.offsets = append(fake.offsets, offset)
 		var items []provider.TrackSummary
-		for id := offset + 1; id <= min(offset+searchPageSize, total); id++ {
+		for id := offset + 1; id <= min(offset+limit, total); id++ {
 			items = append(items, provider.TrackSummary{
 				Ref:     provider.Ref{Provider: fakeProviderName, ID: strconv.Itoa(id)},
 				Title:   fmt.Sprintf("Song %d", id),
@@ -170,7 +173,8 @@ func TestSearchPagination(t *testing.T) {
 		searchPress(t, a.handleCallbackSearch, tg, fmt.Sprintf("search %d %s", press.page, hash), 42, press.reply, time.Now())
 	}
 
-	if want := []int{0, 8, 16, 24}; fmt.Sprint(fake.offsets) != fmt.Sprint(want) {
+	// 首次搜索取回全部可展示的结果，之后翻页都取自缓存
+	if want := []int{0}; fmt.Sprint(fake.offsets) != fmt.Sprint(want) {
 		t.Errorf("offsets = %v, want %v", fake.offsets, want)
 	}
 	if want := []string{"", "", render.NoMoreResults, render.SearchExpired, render.SearchExpired}; strings.Join(fake.answers, "|") != strings.Join(want, "|") {
@@ -217,7 +221,7 @@ func TestSearchMaxPage(t *testing.T) {
 		a.cooldowns = nil
 		searchPress(t, a.handleCallbackSearch, tg, fmt.Sprintf("search %d %s", page, hash), 42, command, time.Now())
 	}
-	if fmt.Sprint(fake.offsets) != "[32]" || len(fake.markups) != 1 {
+	if fmt.Sprint(fake.offsets) != "[0]" || len(fake.markups) != 1 {
 		t.Fatalf("offsets = %v, edits = %d; want only page 5", fake.offsets, len(fake.markups))
 	}
 	if !strings.HasPrefix(fake.edits[0], render.SearchPage(5, 5)+render.SearchItem(33, "Song 33", "Artist")) {
@@ -315,5 +319,90 @@ func TestSearchCallbackDataLength(t *testing.T) {
 				t.Errorf("callback data %q has %d bytes, want 1-64", button.CallbackData, n)
 			}
 		}
+	}
+}
+
+func TestSearchCache(t *testing.T) {
+	a := newTestApp(nil)
+	p := newFakeProvider()
+	var calls atomic.Int32
+	release := make(chan struct{})
+	p.searchFn = func(_ context.Context, keyword string, limit, offset int) ([]provider.TrackSummary, int, error) {
+		calls.Add(1)
+		<-release
+		if keyword == "失败" {
+			return nil, 0, errors.New("rate limited")
+		}
+		if limit != searchFetchLimit || offset != 0 {
+			t.Errorf("limit/offset = %d/%d, want %d/0", limit, offset, searchFetchLimit)
+		}
+		items := make([]provider.TrackSummary, 50)
+		for i := range items {
+			items[i] = provider.TrackSummary{Ref: provider.Ref{ID: strconv.Itoa(i)}}
+		}
+		return items, 300, nil
+	}
+	setTestProvider(t, a, p)
+
+	// 并发的相同搜索只请求一次
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if items, err := a.searchTracks(t.Context(), "", "晴天"); err != nil || len(items) != searchFetchLimit {
+				t.Errorf("searchTracks = %d 条, %v", len(items), err)
+			}
+		})
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if calls.Load() != 1 {
+		t.Fatalf("并发搜索请求了 %d 次, want 1", calls.Load())
+	}
+
+	// 默认 provider 写全名或留空、关键词多余的空格都命中同一份缓存
+	if _, ok := a.cachedSearch(fakeProviderName, "  晴天 "); !ok {
+		t.Error("规范化后的关键词应命中缓存")
+	}
+	if _, err := a.searchTracks(t.Context(), fakeProviderName, "晴天"); err != nil || calls.Load() != 1 {
+		t.Errorf("命中缓存不应再请求, calls = %d", calls.Load())
+	}
+
+	// 失败不缓存
+	for range 2 {
+		if _, err := a.searchTracks(t.Context(), "", "失败"); err == nil {
+			t.Error("应返回错误")
+		}
+	}
+	if calls.Load() != 3 {
+		t.Errorf("失败的搜索应每次重试, calls = %d", calls.Load())
+	}
+
+	// 过期后重新请求
+	key := a.searchCacheKeyOf("", "晴天")
+	a.searches.mu.Lock()
+	entry := a.searches.entries[key]
+	entry.at = entry.at.Add(-searchCacheTTL)
+	a.searches.entries[key] = entry
+	a.searches.mu.Unlock()
+	if _, ok := a.cachedSearch("", "晴天"); ok {
+		t.Error("过期的结果不应命中")
+	}
+}
+
+func TestSearchCacheEviction(t *testing.T) {
+	var c searchCache
+	now := time.Now()
+	for i := range searchCacheSize + 10 {
+		c.put(searchCacheKey{keyword: strconv.Itoa(i)}, nil, now.Add(time.Duration(i)*time.Millisecond))
+	}
+	if len(c.entries) != searchCacheSize {
+		t.Fatalf("缓存条目 = %d, want %d", len(c.entries), searchCacheSize)
+	}
+	if _, ok := c.get(searchCacheKey{keyword: "0"}, now); ok {
+		t.Error("最早写入的条目应被淘汰")
+	}
+	if _, ok := c.get(searchCacheKey{keyword: strconv.Itoa(searchCacheSize + 9)}, now); !ok {
+		t.Error("最新写入的条目应保留")
 	}
 }

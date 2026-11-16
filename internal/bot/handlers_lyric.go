@@ -57,7 +57,7 @@ func (a *App) handleLyric(ctx context.Context, tg *tgb.Bot, update *models.Updat
 		ref = matched
 	}
 	if ref == nil {
-		items, _, err := a.providers.Search(ctx, providerName, query, 5, 0)
+		items, err := a.searchTracks(ctx, providerName, query)
 		if err != nil {
 			a.log.Errorln(err)
 		}

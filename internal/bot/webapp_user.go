@@ -106,27 +106,26 @@ func (a *App) apiSearch(r *http.Request, user webapp.User) (any, error) {
 			return nil, badRequest(msgUnknownProvider)
 		}
 	}
-	// 与 /search 命令一致，最多翻到第 searchMaxPage 页
-	const maxResults = searchMaxPage * searchPageSize
 	_, offset := pageParams(r)
-	if offset >= maxResults {
-		return nil, badRequest(msgNoMoreResults)
+	// 缓存未命中才会请求音乐平台，只在这时限流；翻页取的是同一份缓存
+	results, ok := a.cachedSearch(providerName, keyword)
+	if !ok {
+		if ok, retryAfter := a.web.guard.bySearch.allow(user.ID, time.Now()); !ok {
+			return nil, &rateLimitError{retryAfter}
+		}
+		select {
+		case a.web.guard.search <- struct{}{}:
+			defer func() { <-a.web.guard.search }()
+		default:
+			return nil, &apiError{http.StatusServiceUnavailable, msgSearchBusy}
+		}
+		var err error
+		if results, err = a.searchTracks(r.Context(), providerName, keyword); err != nil {
+			a.log.Errorln(err)
+			return nil, &apiError{http.StatusBadGateway, msgSearchFailed}
+		}
 	}
-	if ok, retryAfter := a.web.guard.bySearch.allow(user.ID, time.Now()); !ok {
-		return nil, &rateLimitError{retryAfter}
-	}
-	select {
-	case a.web.guard.search <- struct{}{}:
-		defer func() { <-a.web.guard.search }()
-	default:
-		return nil, &apiError{http.StatusServiceUnavailable, msgSearchBusy}
-	}
-	summaries, total, err := a.providers.Search(r.Context(), providerName, keyword, searchPageSize, offset)
-	if err != nil {
-		a.log.Errorln(err)
-		return nil, &apiError{http.StatusBadGateway, msgSearchFailed}
-	}
-	total = min(total, maxResults)
+	summaries := results[min(offset, len(results)):min(offset+searchPageSize, len(results))]
 	type item struct {
 		refDTO
 		ProviderName string `json:"provider_name"`
@@ -154,7 +153,7 @@ func (a *App) apiSearch(r *http.Request, user webapp.User) (any, error) {
 			Cached:       cached,
 		})
 	}
-	return map[string]any{"items": items, "total": total, "page_size": searchPageSize}, nil
+	return map[string]any{"items": items, "total": len(results), "page_size": searchPageSize}, nil
 }
 
 // apiMusic 把歌曲发到用户与 bot 的私聊：命中缓存时直接发送，否则下载后发送。

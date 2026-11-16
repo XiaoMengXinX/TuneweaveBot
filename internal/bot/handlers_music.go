@@ -107,7 +107,7 @@ func (a *App) handleMusicArgs(ctx context.Context, m *models.Message, providerNa
 		}
 		return
 	}
-	items, _, err := a.providers.Search(ctx, providerName, args, 10, 0)
+	items, err := a.searchTracks(ctx, providerName, args)
 	if err != nil {
 		a.log.Errorln(err)
 	}

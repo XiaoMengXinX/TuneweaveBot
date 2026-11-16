@@ -41,7 +41,6 @@ var (
 	msgUnknownProvider  = webText{"未知的平台", "Unknown platform"}
 	msgKeywordTooLong   = webText{"关键词太长", "Keyword is too long"}
 	msgInputKeyword     = webText{render.InputKeyword, "Please enter a keyword"}
-	msgNoMoreResults    = webText{render.NoMoreResults, "No more results"}
 	msgSearchBusy       = webText{"搜索繁忙，请稍后再试", "Search is busy, please try again later"}
 	msgSearchFailed     = webText{"搜索失败，请稍后重试", "Search failed, please try again later"}
 	msgSongNotFound     = webText{"歌曲不存在", "Song not found"}

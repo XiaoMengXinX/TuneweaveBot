@@ -82,6 +82,7 @@ type App struct {
 	cooldowns     map[cooldownKey]time.Time     // 冷却截止时间
 	inflight      sync.WaitGroup                // 在途 handler，优雅退出时等待
 	downloads     downloadTracker               // 排队与进行中的下载任务
+	searches      searchCache                   // 搜索结果缓存
 	web           webState
 }
 

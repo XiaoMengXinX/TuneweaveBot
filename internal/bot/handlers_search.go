@@ -158,12 +158,14 @@ func searchKey(providerName, keyword string) string {
 
 // searchPage 没有结果时返回空文本
 func (a *App) searchPage(ctx context.Context, providerName, keyword string, page int) (string, models.InlineKeyboardMarkup, error) {
-	items, count, err := a.providers.Search(ctx, providerName, keyword, searchPageSize, (page-1)*searchPageSize)
-	if err != nil || len(items) == 0 {
+	results, err := a.searchTracks(ctx, providerName, keyword)
+	first := (page - 1) * searchPageSize
+	if err != nil || first >= len(results) {
 		return "", models.InlineKeyboardMarkup{}, err
 	}
-	total := max(page, min(searchMaxPage, (count+searchPageSize-1)/searchPageSize))
-	start := (page-1)*searchPageSize + 1
+	items := results[first:min(first+searchPageSize, len(results))]
+	total := (len(results) + searchPageSize - 1) / searchPageSize
+	start := first + 1
 	var text strings.Builder
 	text.WriteString(render.SearchPage(page, total))
 	refs := make([]provider.Ref, 0, len(items))

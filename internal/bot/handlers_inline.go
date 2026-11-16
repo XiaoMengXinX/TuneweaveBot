@@ -102,10 +102,11 @@ func (a *App) answerInlineSearch(ctx context.Context, query *models.InlineQuery)
 		}, 3600, nil)
 	}
 	const inlineSearchLimit = 10
-	items, _, err := a.providers.Search(ctx, "", keyword, inlineSearchLimit, 0)
+	items, err := a.searchTracks(ctx, "", keyword)
 	if err != nil {
 		return err
 	}
+	items = items[:min(len(items), inlineSearchLimit)]
 	if len(items) == 0 {
 		return a.answerInline(ctx, query.ID, []models.InlineQueryResult{
 			&models.InlineQueryResultArticle{
