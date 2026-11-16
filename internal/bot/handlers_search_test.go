@@ -330,8 +330,11 @@ func TestSearchCache(t *testing.T) {
 	p.searchFn = func(_ context.Context, keyword string, limit, offset int) ([]provider.TrackSummary, int, error) {
 		calls.Add(1)
 		<-release
-		if keyword == "失败" {
+		switch keyword {
+		case "失败":
 			return nil, 0, errors.New("rate limited")
+		case "空":
+			return nil, 0, nil
 		}
 		if limit != searchFetchLimit || offset != 0 {
 			t.Errorf("limit/offset = %d/%d, want %d/0", limit, offset, searchFetchLimit)
@@ -368,21 +371,33 @@ func TestSearchCache(t *testing.T) {
 		t.Errorf("命中缓存不应再请求, calls = %d", calls.Load())
 	}
 
-	// 失败不缓存
+	// 出错不缓存；没有结果的搜索缓存较短的时间
 	for range 2 {
 		if _, err := a.searchTracks(t.Context(), "", "失败"); err == nil {
 			t.Error("应返回错误")
 		}
+		if items, err := a.searchTracks(t.Context(), "", "空"); err != nil || len(items) != 0 {
+			t.Errorf("空结果 = %d 条, %v", len(items), err)
+		}
 	}
-	if calls.Load() != 3 {
-		t.Errorf("失败的搜索应每次重试, calls = %d", calls.Load())
+	if calls.Load() != 4 {
+		t.Errorf("出错的搜索应每次重试、空结果应命中缓存, calls = %d", calls.Load())
+	}
+	expiry := func(keyword string) time.Duration {
+		a.searches.mu.Lock()
+		defer a.searches.mu.Unlock()
+		e := a.searches.entries[a.searchCacheKeyOf("", keyword)]
+		return e.expires.Sub(e.at)
+	}
+	if expiry("晴天") != searchCacheTTL || expiry("空") != searchEmptyTTL {
+		t.Errorf("缓存时长 = %v / %v", expiry("晴天"), expiry("空"))
 	}
 
 	// 过期后重新请求
 	key := a.searchCacheKeyOf("", "晴天")
 	a.searches.mu.Lock()
 	entry := a.searches.entries[key]
-	entry.at = entry.at.Add(-searchCacheTTL)
+	entry.expires = time.Now()
 	a.searches.entries[key] = entry
 	a.searches.mu.Unlock()
 	if _, ok := a.cachedSearch("", "晴天"); ok {

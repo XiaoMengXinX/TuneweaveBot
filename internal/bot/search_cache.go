@@ -14,8 +14,11 @@ import (
 const (
 	// searchFetchLimit 是一次搜索取回的条数，等于 bot 最多会展示的结果数（/search 的全部页）。
 	searchFetchLimit = searchMaxPage * searchPageSize
-	// searchCacheTTL 与搜索结果按钮的有效期一致，按钮有效期内翻页不会再请求音乐平台。
-	searchCacheTTL = searchLifetime
+	// searchCacheTTL 是有结果的搜索的缓存时长。搜索结果变化很慢，缓存久一些可以减少触发音乐平台风控。
+	searchCacheTTL = time.Hour
+	// searchEmptyTTL 是没有结果的搜索的缓存时长。风控时平台可能返回空结果，缓存时间短一些，
+	// 避免这个关键词长时间搜不到。
+	searchEmptyTTL = 10 * time.Minute
 	// searchCacheSize 是缓存的关键词数上限，超出时淘汰最早写入的。
 	searchCacheSize = 256
 )
@@ -34,8 +37,9 @@ type searchCacheKey struct {
 }
 
 type searchCacheEntry struct {
-	items []provider.TrackSummary
-	at    time.Time
+	items   []provider.TrackSummary
+	at      time.Time
+	expires time.Time
 }
 
 // searchCacheKeyOf 规范化 provider 与关键词；空 provider 视为默认 provider。
@@ -50,12 +54,13 @@ func (c *searchCache) get(key searchCacheKey, now time.Time) ([]provider.TrackSu
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[key]
-	if !ok || now.Sub(entry.at) >= searchCacheTTL {
+	if !ok || !now.Before(entry.expires) {
 		return nil, false
 	}
 	return entry.items, true
 }
 
+// put 写入结果，没有结果时按 searchEmptyTTL 缓存。
 func (c *searchCache) put(key searchCacheKey, items []provider.TrackSummary, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -66,7 +71,7 @@ func (c *searchCache) put(key searchCacheKey, items []provider.TrackSummary, now
 		var oldest searchCacheKey
 		var oldestAt time.Time
 		for k, e := range c.entries {
-			if now.Sub(e.at) >= searchCacheTTL {
+			if !now.Before(e.expires) {
 				delete(c.entries, k)
 			} else if oldestAt.IsZero() || e.at.Before(oldestAt) {
 				oldest, oldestAt = k, e.at
@@ -76,7 +81,11 @@ func (c *searchCache) put(key searchCacheKey, items []provider.TrackSummary, now
 			delete(c.entries, oldest)
 		}
 	}
-	c.entries[key] = searchCacheEntry{items: items, at: now}
+	ttl := searchCacheTTL
+	if len(items) == 0 {
+		ttl = searchEmptyTTL
+	}
+	c.entries[key] = searchCacheEntry{items: items, at: now, expires: now.Add(ttl)}
 }
 
 // cachedSearch 返回有效期内已缓存的结果，不发起请求。
@@ -85,7 +94,7 @@ func (a *App) cachedSearch(providerName, keyword string) ([]provider.TrackSummar
 }
 
 // searchTracks 返回关键词的前 searchFetchLimit 条结果，优先取缓存；并发的相同搜索只请求一次。
-// 返回的切片与缓存共享，调用方不得修改。失败的结果不缓存。
+// 返回的切片与缓存共享，调用方不得修改。出错的搜索不缓存。
 func (a *App) searchTracks(ctx context.Context, providerName, keyword string) ([]provider.TrackSummary, error) {
 	key := a.searchCacheKeyOf(providerName, keyword)
 	if items, ok := a.searches.get(key, time.Now()); ok {
