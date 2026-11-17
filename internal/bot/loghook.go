@@ -11,6 +11,7 @@ import (
 // 群内无权限、话题关闭、状态消息已被删除和限流属于预期情况
 var expectedErrors = []string{
 	"not enough rights to send",
+	"CHAT_SEND_PLAIN_FORBIDDEN",
 	"TOPIC_CLOSED",
 	"message to edit not found",
 	"message to delete not found",
