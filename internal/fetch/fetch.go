@@ -27,7 +27,7 @@ type Request struct {
 type Progress struct {
 	Attempt int    // 第几次尝试，从 1 开始
 	Written int64  // 已下载字节
-	Total   int64  // 文件总大小
+	Total   int64  // 文件总大小，服务器未给出时为 0
 	Speed   string // 最近 500ms 的速度
 }
 
@@ -105,8 +105,9 @@ func (dl *Downloader) watch(ctx context.Context, task *downloader.DownloadTask, 
 			<-errCh
 			return ctx.Err()
 		case <-ticker.C:
-			written, total := task.GetWrittenBytes(), task.GetFileSize()
-			if total != 0 && written != 0 {
+			// 服务器不返回 Content-Length 时下载器给出的大小为 -1
+			written, total := task.GetWrittenBytes(), max(task.GetFileSize(), 0)
+			if written > 0 {
 				progress(Progress{
 					Attempt: attempt,
 					Written: written,

@@ -197,8 +197,11 @@ func MusicStatus(name, album, ext, suffix string) string {
 
 const progressBarWidth = 20
 
-// TransferProgress 渲染等宽字体的进度条，调用方需保证 total > 0。
+// TransferProgress 渲染等宽字体的进度条；total 为 0 表示大小未知，只显示已传输大小与速度。
 func TransferProgress(speed string, written, total int64) string {
+	if total <= 0 {
+		return fmt.Sprintf("<code>%.2f MB  %s</code>", float64(written)/1024/1024, Escape(speed))
+	}
 	filled := min(int(written*progressBarWidth/total), progressBarWidth)
 	bar := strings.Repeat("=", filled)
 	if filled < progressBarWidth {

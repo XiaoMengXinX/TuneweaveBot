@@ -35,14 +35,18 @@ function TaskRow({ task, now, position }: { task: DownloadTask; now: number; pos
         <div className="task-meta">{t.downloads.position(position)}</div>
       ) : (
         active &&
-        task.total > 0 && (
+        task.written > 0 && (
           <>
-            <div className="meter">
-              <i style={{ width: `${percent}%` }} />
-            </div>
+            {/* 大小未知时只显示已传输的大小 */}
+            {task.total > 0 && (
+              <div className="meter">
+                <i style={{ width: `${percent}%` }} />
+              </div>
+            )}
             <div className="task-meta num">
               <span>
-                {formatBytes(task.written)} / {formatBytes(task.total)}
+                {formatBytes(task.written)}
+                {task.total > 0 && ` / ${formatBytes(task.total)}`}
               </span>
               <span>{task.speed > 0 ? `${formatBytes(task.speed)}/s` : ''}</span>
             </div>

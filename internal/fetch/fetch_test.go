@@ -188,3 +188,35 @@ func TestDownloadMusicContextCancel(t *testing.T) {
 		t.Errorf("取消后临时文件应清理, 残留 %d 个", len(entries))
 	}
 }
+
+// 服务器不返回 Content-Length 时，进度里的总大小为 0 而不是负数。
+func TestDownloadMusicUnknownSize(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			return
+		}
+		flusher := w.(http.Flusher)
+		for range 4 {
+			_, _ = w.Write([]byte("chunk-of-music-data"))
+			flusher.Flush() // 分块传输，响应不带 Content-Length
+			time.Sleep(300 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+
+	var reports []Progress
+	dl := New(t.TempDir(), 10*time.Second, 0)
+	if err := dl.DownloadMusic(context.Background(), Request{URL: srv.URL + "/song.mp3", FileName: "song.mp3"}, func(p Progress) {
+		reports = append(reports, p)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(reports) == 0 {
+		t.Fatal("应至少报告一次进度")
+	}
+	for _, p := range reports {
+		if p.Total != 0 || p.Written <= 0 {
+			t.Errorf("大小未知时的进度 = %+v, want Total 0", p)
+		}
+	}
+}

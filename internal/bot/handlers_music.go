@@ -341,7 +341,7 @@ func (a *App) fetchMusic(ctx context.Context, ref, display provider.Ref, track *
 		resolveCtx := plugin.WithDownloadProgress(ctx, func(p plugin.DownloadProgress) {
 			task.setTitle(p.Title, p.Album)
 			task.progress(phaseResolving, p.Written, p.Total)
-			if p.Total <= 0 || !due() {
+			if !due() {
 				return
 			}
 			text := render.TransferWithInfo(p.Title, p.Album, "", render.Downloading, p.Speed, p.Written, p.Total)

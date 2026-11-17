@@ -78,6 +78,8 @@ func TestTransferProgress(t *testing.T) {
 		{3 * mb, 10 * mb, "<code>[======>             ]  30%</code>\n<code>3.00/10.00 MB  1.5 MB/s</code>"},
 		{10 * mb, 10 * mb, "<code>[====================] 100%</code>\n<code>10.00/10.00 MB  1.5 MB/s</code>"},
 		{0, 10 * mb, "<code>[>                   ]   0%</code>\n<code>0.00/10.00 MB  1.5 MB/s</code>"},
+		// 大小未知
+		{3 * mb, 0, "<code>3.00 MB  1.5 MB/s</code>"},
 	}
 	for _, c := range cases {
 		if got := TransferProgress("1.5 MB/s", c.written, c.total); got != c.want {
