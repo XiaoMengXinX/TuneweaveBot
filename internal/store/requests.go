@@ -89,9 +89,11 @@ var songOrderSQL = map[SongOrder]string{
 // UserSongs 列出用户点过的歌曲，未知的 order 按 OrderRecent 处理；query 非空时匹配歌名、歌手与专辑。
 func (s *Store) UserSongs(userID int64, query string, order SongOrder, limit, offset int) (songs []UserSong, total int64, err error) {
 	base := func() *gorm.DB {
-		tx := s.db.Table("song_infos AS s").
-			Joins(`JOIN (SELECT song_id, MAX(created_at) AS last_at, COUNT(*) AS times
-				FROM song_requests WHERE user_id = ? GROUP BY song_id) AS r ON r.song_id = s.id`, userID).
+		// CROSS JOIN 固定连接顺序：先取用户点过的歌，再按主键查 song_infos。普通 JOIN 下 SQLite
+		// 可能先扫描整张 song_infos 做关键词匹配，缓存有几十万首时一次查询要近一秒。
+		tx := s.db.Table(`(SELECT song_id, MAX(created_at) AS last_at, COUNT(*) AS times
+				FROM song_requests WHERE user_id = ? GROUP BY song_id) AS r`, userID).
+			Joins("CROSS JOIN song_infos AS s ON s.id = r.song_id").
 			Where("s.deleted_at IS NULL")
 		return matchSong(tx, "s.", query)
 	}
