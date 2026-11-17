@@ -157,4 +157,19 @@ func TestStatsMixedTimezones(t *testing.T) {
 	if len(got) != 2 || got["2026-11-11"] != 2 || got["2026-11-17"] != 1 {
 		t.Errorf("每日新增缓存 = %v, want 11-11:2 11-17:1", got)
 	}
+
+	// 按用户时区（UTC+8）划分自然日，同样的数据落在不同的日期
+	stats, err = s.Stats(now.In(time.FixedZone("UTC+8", 8*3600)), 7, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = map[string]int64{}
+	for _, d := range stats.Cached {
+		if d.Count > 0 {
+			got[d.Day] = d.Count
+		}
+	}
+	if len(got) != 3 || got["2026-11-11"] != 2 || got["2026-11-12"] != 1 || got["2026-11-17"] != 1 {
+		t.Errorf("UTC+8 的每日新增缓存 = %v, want 11-11:2 11-12:1 11-17:1", got)
+	}
 }

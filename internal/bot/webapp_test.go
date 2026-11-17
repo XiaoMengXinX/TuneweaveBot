@@ -209,6 +209,22 @@ func TestReadLogs(t *testing.T) {
 	}
 }
 
+func TestRequestLocation(t *testing.T) {
+	for header, want := range map[string]string{
+		"":                 time.Local.String(),
+		"Asia/Shanghai":    "Asia/Shanghai",
+		"America/New_York": "America/New_York",
+		// 无法识别时使用服务器时区
+		"Mars/Base":        time.Local.String(),
+		"../../etc/passwd": time.Local.String(),
+	} {
+		r := &http.Request{Header: http.Header{"X-Timezone": {header}}}
+		if loc := requestLocation(r); loc.String() != want {
+			t.Errorf("X-Timezone %q = %v, want %v", header, loc, want)
+		}
+	}
+}
+
 func TestWebAppErrorLanguage(t *testing.T) {
 	a := newTestApp(nil)
 	a.web.guard = newWebGuard()

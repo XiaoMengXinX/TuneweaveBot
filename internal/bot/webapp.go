@@ -224,6 +224,17 @@ type rateLimitError struct{ retryAfter time.Duration }
 
 func (e *rateLimitError) Error() string { return "rate limited" }
 
+// requestLocation 返回前端在 X-Timezone 请求头中给出的用户时区（IANA 名称），统计按它划分自然日；
+// 没有该请求头或无法识别时使用服务器时区。
+func requestLocation(r *http.Request) *time.Location {
+	if name := r.Header.Get("X-Timezone"); name != "" {
+		if loc, err := time.LoadLocation(name); err == nil {
+			return loc
+		}
+	}
+	return time.Local
+}
+
 func (a *App) isAdmin(userID int64) bool { return slices.Contains(a.cfg.Bot.Admin, userID) }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

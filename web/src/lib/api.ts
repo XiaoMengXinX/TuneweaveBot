@@ -1,6 +1,8 @@
 import { initData } from './telegram'
 import { lang, t } from './i18n'
 
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -26,6 +28,8 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
       headers: {
         Authorization: 'tma ' + initData,
         'X-Language': lang,
+        // 统计按用户所在时区划分日期
+        'X-Timezone': timeZone,
         ...(body !== undefined && { 'Content-Type': 'application/json' }),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,

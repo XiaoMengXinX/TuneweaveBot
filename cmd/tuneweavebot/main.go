@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	// 面板按用户时区统计，Windows 与精简容器里可能没有系统时区数据库
+	_ "time/tzdata"
 
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/bot"
 	"github.com/XiaoMengXinX/TuneweaveBot/internal/config"

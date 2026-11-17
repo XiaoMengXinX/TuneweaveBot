@@ -153,6 +153,7 @@ func (a *App) cacheTotals() (songs, size int64, err error) {
 type statsKey struct {
 	days     int
 	provider string
+	timezone string // 按用户时区划分自然日
 }
 
 type cachedStats struct {
@@ -169,7 +170,8 @@ func (a *App) apiStats(r *http.Request, user webapp.User) (any, error) {
 	if !slices.Contains([]int{7, 30, 90}, days) {
 		return nil, badRequest(msgStatsDays)
 	}
-	key := statsKey{days, q.Get("provider")}
+	loc := requestLocation(r)
+	key := statsKey{days, q.Get("provider"), loc.String()}
 	if key.provider != "" {
 		if _, ok := a.providers.Get(key.provider); !ok {
 			return nil, badRequest(msgUnknownProvider)
@@ -182,7 +184,7 @@ func (a *App) apiStats(r *http.Request, user webapp.User) (any, error) {
 	if hit, ok := a.web.stats[key]; ok && time.Since(hit.at) < statsTTL {
 		return hit.data, nil
 	}
-	stats, err := a.store.Stats(time.Now(), key.days, key.provider)
+	stats, err := a.store.Stats(time.Now().In(loc), key.days, key.provider)
 	if err != nil {
 		return nil, err
 	}
